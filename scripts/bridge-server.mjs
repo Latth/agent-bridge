@@ -8,7 +8,7 @@ import http from 'node:http';
 import path from 'node:path';
 import fs from 'node:fs';
 import {
-  PROTOCOL, DEFAULT_PORT, MAX_BODY_BYTES, MAX_ATTACHMENT_BYTES, CLOCK_SKEW_MS, CODE_TTL_MS, MAX_PAIR_FAILURES,
+  PROTOCOL, SKILL_VERSION, DEFAULT_PORT, MAX_BODY_BYTES, MAX_ATTACHMENT_BYTES, CLOCK_SKEW_MS, CODE_TTL_MS, MAX_PAIR_FAILURES,
   LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, randomId, newPairingCode, normalizeCode, pairProof, safeEqual,
   genKeyPair, deriveSessionKey, seal, open, requestAad, responseAad, resolveStateDir, ensureDir, readJson,
   writeJsonPrivate, appendJsonl,
@@ -50,6 +50,9 @@ if (!state || state.protocol !== PROTOCOL) {
 const hostPeer = Object.values(state.peers).find((p) => p.is_host);
 hostPeer.role = ROLE; // allow the host to restart with a corrected role/name
 hostPeer.name = NAME;
+hostPeer.version = SKILL_VERSION;
+// Versions come from peers; keep them short and printable so they can't smuggle text into other agents' output.
+const cleanVersion = (v) => (/^[0-9][0-9A-Za-z.+-]{0,19}$/.test(String(v ?? '')) ? String(v) : null);
 const saveState = () => writeJsonPrivate(STATE_FILE, state);
 saveState();
 
@@ -108,7 +111,7 @@ function rateLimited(key, capacity, refillPerSec) {
 }
 
 const publicPeer = (p) => ({
-  id: p.id, role: p.role, name: p.name, is_host: !!p.is_host,
+  id: p.id, role: p.role, name: p.name, is_host: !!p.is_host, version: p.version ?? null,
   online: p.is_host || (p.last_seen && Date.now() - p.last_seen < 90_000),
 });
 
@@ -212,7 +215,7 @@ async function handlePair(req, res) {
   let key;
   try { key = deriveSessionKey(kp.privateKey, input.client_pub, code, transcript); } catch { throw new HttpError(400, 'bad client_pub'); }
 
-  const peer = { id: peerId, role, name, key: b64u(key), is_host: false, joined_at: new Date().toISOString(), last_seen: Date.now() };
+  const peer = { id: peerId, role, name, version: cleanVersion(input.client_version), key: b64u(key), is_host: false, joined_at: new Date().toISOString(), last_seen: Date.now() };
   state.peers[peerId] = peer;
   saveState();
   log(`peer joined: ${name} (${role}) ${peerId}`);
@@ -252,6 +255,8 @@ async function handleRpc(req, res, op) {
   seenNonces.set(nonce, Date.now() + 2 * CLOCK_SKEW_MS);
 
   peer.last_seen = Date.now();
+  const v = cleanVersion(req.headers['x-ab-version']);
+  if (v && v !== peer.version) { peer.version = v; saveState(); }
   const reply = (obj) => send(res, 200, seal(fromB64u(peer.key), obj, responseAad(nonce)));
 
   switch (op) {
@@ -333,7 +338,7 @@ function log(line) {
 const server = http.createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://x');
-    if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, protocol: PROTOCOL, time: Date.now() });
+    if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { ok: true, protocol: PROTOCOL, version: SKILL_VERSION, time: Date.now() });
     if (req.method === 'POST' && url.pathname === '/pair') return await handlePair(req, res);
     const m = url.pathname.match(/^\/rpc\/([a-z_]+)$/);
     if (req.method === 'POST' && m) return await handleRpc(req, res, m[1]);

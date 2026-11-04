@@ -1,5 +1,5 @@
 // End-to-end test: a host ("backend") and a peer ("mobile") on one machine, each with its own state dir.
-// Run: node --test agent-bridge/tests/
+// Run: node --test tests/*.test.mjs
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -39,7 +39,7 @@ let scenarioMsgId;
 test('host refuses to default to ngrok when ngrok is missing, with install help', async () => {
   const r = await run(path.join(ROOT, 'nongrok'), 'host', '--role', 'backend', '--port', String(PORT + 1));
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /ngrok is not installed/);
+  assert.match(r.stderr, /ngrok was not found/);
   assert.match(r.stderr, /--lan/);
 });
 

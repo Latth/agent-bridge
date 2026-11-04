@@ -29,13 +29,15 @@ node "<skill-dir>/scripts/bridge.mjs" <command> [options]
 |---|---|
 | `bridge host --role <role> [--lan] [--ngrok] [--port 7878] [--name "..."]` | Start the relay on this machine. ngrok is the default; `--lan` exposes it on the local network instead (both flags together do both). Prints the address and a single-use pairing code (15 min). |
 | `bridge connect <https-url \| ip[:port]> --code <CODE> --role <role> [--name "..."]` | Join a relay. |
-| `bridge send --type <type> [--to <role\|peer_id\|*>] [--thread <id>] [--reply-to <msg_id>] [--body-file f.json \| --body '...'] [--file path]...` | Send a message. `--reply-to` fills in the thread and recipient automatically. |
+| `bridge resume <https-url \| ip[:port]>` | (peer) Keep your pairing and switch to the host's new address, for example after the host restarted with a new ngrok URL. No code needed. |
+| `bridge send --type <type> [--to <role\|peer_id\|*>] [--thread <id> \| --new-thread] [--reply-to <msg_id>] [--body-file f.json \| --body '...'] [--file path]...` | Send a message. `--reply-to` fills in the thread and recipient automatically. Without `--thread`/`--reply-to` it continues the last thread; `--new-thread` sends with no thread. Warns when no listener is running. |
 | `bridge wait [--timeout 1800]` | Block until a message arrives (exit 0) or the timeout passes (exit 2). Exit 4 means another listener is already running. |
 | `bridge inbox` | Peek at unread messages without consuming them. |
 | `bridge status` | Peers, relay/tunnel address, unread count, whether a listener is running. |
 | `bridge code` | (host) Issue a new pairing code, for example when the old one expired or another device should join. |
 | `bridge log [--n 20]` | Recent messages sent and received on this machine. |
 | `bridge kick <peer_id>` / `bridge close` | Remove a peer / end the bridge. `close` on the host revokes every key. |
+| `bridge version` | This machine's agent-bridge version (put it in your `hello`). |
 
 Add `--json` to any command for machine-readable output.
 
@@ -55,13 +57,20 @@ Parse the arguments the user gave with the slash command:
   - when a monorepo holds several of these, ask your user which part this session speaks for.
 
   Then run `bridge host --role <role>`.
-  - If ngrok is missing or not signed in, the CLI explains what to do. Tell the user, and offer `--lan` if
-    both machines are on the same network. The ngrok authtoken is a secret: the user types it into their own
+  - If ngrok is missing, too old or not signed in, the CLI says which one and what to run. For "too old"
+    that is `ngrok update`, which you may run yourself. Tell the user, and offer `--lan` if both machines are
+    on the same network. The ngrok authtoken is a secret: the user types it into their own
     terminal (`ngrok config add-authtoken ...`). Never ask for it in chat and never run it yourself.
   - Give the user the exact `connect` line the CLI printed. They pass it to the other team (the code is
     single use and expires in 15 minutes).
 - **`connect <address> --code <CODE> [--role ...]`, or a pasted address plus code.** Run `bridge connect`.
   If no role was given, infer it the same way.
+- **`resume <address>`, or a new address without a code from a host you were already paired with.** Run
+  `bridge resume <address>`. If it says the relay no longer knows this device, the host closed the bridge:
+  ask for a fresh `connect` line.
+- **Host restarted** (reboot, crash, or ngrok restarted with a new URL). Run `bridge host` again with the same
+  role. Paired peers keep their keys, and the CLI prints a `resume` line for them. Give that line to the user
+  to pass on. Only `close` revokes the pairings.
 - **More than two agents.** Backend, mobile and frontend can all join one relay: the host runs `bridge code`
   once for each extra device, since every code is single use. Address messages by role (`--to frontend`),
   or use `--to '*'` for something everyone needs, such as `fix_ready` when both clients must retest.
@@ -76,7 +85,10 @@ Then, on both sides:
    (staging URL, how test data is created, app package name, logcat tag, test device...). If it is missing,
    discover what you can from the project, ask the user only for the gaps, and save it, so the next session
    doesn't ask again. The playbooks list what belongs in it.
-3. Send `hello` with your capabilities (see [references/protocol.md](references/protocol.md)).
+3. Send `hello` with your capabilities and `skill_version` from `bridge version` (see
+   [references/protocol.md](references/protocol.md)). If the CLI prints a `note:` that the other side runs a
+   different agent-bridge version, tell your user in one line. Behavior such as thread handling can differ
+   until both sides update.
 4. Start listening (next section).
 
 ## Listening: the loop that keeps the conversation going
@@ -93,8 +105,14 @@ When the background `wait` finishes:
 - **Exit 2 (timeout).** Nothing arrived. Start `wait` again quietly, without a long message to the user.
 - **Exit 4.** A listener is already running. Leave it alone.
 - **Error (relay unreachable, unknown peer).** Run `bridge status`, tell the user what is wrong, and suggest
-  a fix: the host may have closed the bridge, or the ngrok URL changed after a restart, so a new pairing is
-  needed.
+  a fix. If the host restarted with a new URL, use `bridge resume <new-url>`. If the host closed the bridge,
+  pair again.
+
+**Re-arm right away, every time.** The moment you have sent your replies, start the background `wait` again,
+before you write to the user or do anything else. A message that arrives while no listener runs is not lost,
+but nothing wakes you for it. `send` prints a `reminder:` line when no listener is running; treat it as "start
+one now". Before you end a turn, check that a listener is running and nothing is unread (`bridge status` shows
+both). Handle any unread message first.
 
 Keep one listener per session. When the work is finished (`final_report` sent and acknowledged), don't
 re-arm. Ask the user whether to `close` the bridge.
@@ -104,9 +122,11 @@ background and wakes you when a message comes.
 
 ## Working with the other agent
 
-- **One feature or task = one thread.** If the other agent already started a thread, keep using its
-  `thread_id`; otherwise pick a short slug like `login-v2`. Use `--reply-to <msg_id>` when answering a
-  specific message. IDs inside bodies (scenarios `S1`, bugs `B1`) let
+- **One conversation = one thread.** If the other agent already started a thread for this work, join it;
+  otherwise pick a short slug like `login-v2`. Don't open a second thread for the same conversation, not even
+  one named after your own project: with two threads the other side loses track. Answer with
+  `--reply-to <msg_id>`. Without it, `send` continues the last thread. Start a new one (`--thread <slug>`)
+  only when the topic really changes. IDs inside bodies (scenarios `S1`, bugs `B1`) let
   both sides refer to the same thing.
 - **One step = one message**, using the protocol types (`test_scenarios`, `data_request`, `bug_report`, ...).
   Don't batch the whole plan into one giant message, and don't send a stream of tiny ones either: the other

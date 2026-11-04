@@ -1,0 +1,12 @@
+{
+  "name": "latth-agent-bridge",
+  "description": "Agent Bridge: connect Claude Code sessions across machines",
+  "owner": { "name": "Latth" },
+  "plugins": [
+    {
+      "name": "agent-bridge",
+      "source": "./",
+      "description": "Connect Claude Code sessions on different machines (backend, mobile, web) so the agents can run test cycles together."
+    }
+  ]
+}

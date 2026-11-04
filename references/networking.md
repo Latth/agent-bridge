@@ -12,11 +12,17 @@ One-time setup on the **host** machine. The user does this; the authtoken is the
 
 Then `bridge host --role backend` starts the relay and the tunnel and prints the `https://....ngrok-free.app`
 address. Notes:
-- On the free plan the URL changes every time ngrok restarts. If the host machine restarts, run `host`
-  again and pair again with the new URL and code.
+- On the free plan the URL changes every time ngrok restarts. When the host machine restarts, run `host`
+  again with the same role. Peers that were already paired keep their keys: they run
+  `bridge resume <new-url>`, which the host's output prints, and need no new code. Only `close` ends the
+  pairings.
+- ngrok sets a **minimum agent version per account**, so a fresh install from a package manager can be too old
+  ("Your ngrok-agent version ... is too old"). The CLI recognizes this and tells you to run `ngrok update`.
 - The free plan allows one ngrok agent at a time. If another ngrok is already running, the error mentions
   `ERR_NGROK_108`: close the other one, or use `--lan`.
-- If ngrok isn't on PATH, pass `--ngrok-bin <path>` or set `NGROK_BIN`.
+- The CLI finds ngrok on PATH and in the usual install folders (winget, Chocolatey, Scoop, Homebrew, snap),
+  so it works right after `winget install`, before a new shell has picked up PATH. For anything else, pass
+  `--ngrok-bin <path>` or set `NGROK_BIN`.
 
 ## LAN (same office or Wi-Fi)
 
@@ -41,6 +47,9 @@ address(es). The other machine connects with `bridge connect 192.168.1.20:7878 -
 | `401 pairing failed` | Code typed wrong, expired (15 min), already used, or burned by failed attempts | Host runs `bridge code` and shares the new one |
 | `could not prove it knows the pairing code` | Wrong address (another service), or interception | Double-check the URL with the host; do not proceed otherwise |
 | `the relay no longer knows this device` | Host ran `close`, or `kick`ed you | Pair again with a fresh code |
+| `cannot reach https://....ngrok-free...` after it worked before | Host restarted, so ngrok has a new URL | Host runs `bridge host` again; the peer runs `bridge resume <new-url>` |
+| ngrok "agent version ... is too old" | Package-manager ngrok is older than the account's minimum | `ngrok update`, then `bridge host` again |
+| `note: ... runs agent-bridge 1.0 ...` | The two machines run different skill versions | Update the older side (`git pull` in the skill folder, or update the plugin) |
 | `clock skew` | Device clocks differ by more than 2 min | The CLI resyncs automatically once; if it repeats, fix the system clock |
 | `429 rate limited` | Too many requests in a burst | Slow down; never poll in a loop, use `wait` |
 | ngrok `ERR_NGROK_4018` / authtoken error | ngrok not signed in | The user runs `ngrok config add-authtoken <token>` |

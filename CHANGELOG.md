@@ -1,0 +1,26 @@
+# Changelog
+
+## 1.1.0
+
+Changes from the first two-machine field test (ngrok, backend ↔ mobile).
+
+- **Listener reminders.** `send` warns when no `wait` is running on this machine, and `wait` output ends with
+  the next step. SKILL.md now says to re-arm right after replying and to check for unread messages before
+  ending a turn. In the field test a reply went unnoticed because the listener had not been restarted.
+- **One conversation, one thread.** Without `--thread` or `--reply-to`, `send` continues the last thread
+  (`--new-thread` sends with no thread). SKILL.md says not to open a second thread for the same
+  conversation. In the field test the peer split one conversation across two threads.
+- **`bridge resume <url>`.** After a host restart (a new ngrok URL), paired peers switch to the new address
+  with their existing key; no new pairing code is needed. The host prints the `resume` line for them.
+- **Versions.** `bridge version`. Peers report their version on every request, `status` and `connect` show
+  it, and the CLI prints a note when the two sides differ. `hello` carries `skill_version`.
+- **ngrok.** Finds ngrok in winget/Chocolatey/Scoop/Homebrew/snap folders when PATH isn't refreshed yet.
+  It tells "agent too old" (run `ngrok update`) apart from "not signed in" and "another session running";
+  the old message blamed the authtoken for all of them.
+- **Plugin.** `.claude-plugin/plugin.json` and `marketplace.json`: install with
+  `/plugin marketplace add Latth/agent-bridge`.
+- Web frontend role (playbook, web-testing reference, eval case) and multi-agent relays, added after 1.0.0.
+
+## 1.0.0
+
+First release: encrypted relay + CLI, protocol, backend and mobile playbooks, security policy, evals.

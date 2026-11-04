@@ -38,13 +38,30 @@ The motivating case is a test cycle between teams:
 
 ## Install
 
+Do this on **both** machines. Both need Node.js 18+. The host needs [ngrok](https://ngrok.com/download)
+(signed in once with `ngrok config add-authtoken <token>`) unless both machines are on the same network.
+
+**As a plugin** (recommended; updates arrive through `/plugin`):
+
+```
+/plugin marketplace add Latth/agent-bridge
+/plugin install agent-bridge@latth-agent-bridge
+```
+
+As a plugin, the skill's command is namespaced under the plugin name. Type `/agent-bridge` and pick it
+from the list.
+
+**As a plain skill**:
+
 ```bash
 git clone https://github.com/Latth/agent-bridge ~/.claude/skills/agent-bridge
 ```
 
 On Windows: `git clone https://github.com/Latth/agent-bridge "%USERPROFILE%\.claude\skills\agent-bridge"`.
-Do this on **both** machines. Both need Node.js 18+. The host needs [ngrok](https://ngrok.com/download)
-(signed in once with `ngrok config add-authtoken <token>`) unless both machines are on the same network.
+Update later with `git pull` in that folder.
+
+Both machines should run the same version. Each side's `hello` carries it, and the CLI warns when the
+versions differ (`bridge version` shows yours).
 
 ## Use
 
@@ -68,17 +85,24 @@ your own agent normally ("send them the scenarios for the login change", "report
 More than two agents can join one relay. Ask the host agent for a new pairing code for each extra device;
 it runs `bridge code`.
 
+If the host machine restarts, ngrok's free plan gives it a new URL. Run `/agent-bridge host --role backend`
+again. Already-paired peers keep their keys and only need `/agent-bridge resume <new-url>`. No new code is
+needed until someone runs `close`.
+
 ## Status
 
 Tested:
-- 12 end-to-end tests of the relay and CLI: pairing, encryption, replay and tamper rejection, attachments,
-  long-poll (`node --test tests/e2e.test.mjs`).
+- 19 end-to-end tests of the relay and CLI (`node --test tests/*.test.mjs`): pairing, encryption, replay and tamper
+  rejection, attachments, long-poll, resume after a host restart, version reporting, thread reuse.
 - Behavior evals with a scripted peer, covering four scenarios: backend creates staging data, backend refuses
   a production migration and secrets, mobile bug report, web bug report. With the skill all 26 checks
   passed; without it, about 57–81%. See [tests/eval-harness/README.md](tests/eval-harness/README.md).
 
-**Not yet verified in the field**: a real ngrok tunnel, two physical machines, and background wake-up over
-long sessions. Feedback and issues are welcome.
+- A field smoke test between two machines on different networks over ngrok: pairing, `hello` in both
+  directions, an attachment, and background wake-up on every message.
+
+**Not yet verified in the field**: a full data-request → fix → retest cycle on a real project, and very long
+sessions. Feedback and issues are welcome.
 
 ## Layout
 

@@ -1,0 +1,11 @@
+{
+  "name": "agent-bridge",
+  "displayName": "Agent Bridge",
+  "version": "1.1.0",
+  "description": "Connect Claude Code sessions on different machines (backend, mobile, web) over an end-to-end encrypted relay so the agents can run test cycles together.",
+  "author": { "name": "Latth", "url": "https://github.com/Latth" },
+  "homepage": "https://github.com/Latth/agent-bridge",
+  "repository": "https://github.com/Latth/agent-bridge",
+  "license": "MIT",
+  "keywords": ["multi-agent", "collaboration", "testing", "mobile", "backend", "frontend", "ngrok"]
+}

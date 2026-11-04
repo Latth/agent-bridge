@@ -3,7 +3,8 @@
 //
 //   host     --role <role> [--ngrok | --lan] [--port 7878] [--name "..."]   start the relay on this machine
 //   connect  <url | ip[:port]> --code <CODE> --role <role> [--name "..."]   join a relay from another machine
-//   send     --type <type> [--to <role|peer_id|*>] [--thread <id>] [--reply-to <msg_id>]
+//   resume   <url | ip[:port]>         keep your pairing, point it at the host's new address (e.g. new ngrok URL)
+//   send     --type <type> [--to <role|peer_id|*>] [--thread <id> | --new-thread] [--reply-to <msg_id>]
 //            [--body '<json or text>' | --body-file <path> | --body -] [--file <path>]...
 //   wait     [--timeout <seconds>]     block until a message arrives (exit 0) or timeout (exit 2)
 //   inbox                              show unread messages without consuming them
@@ -12,6 +13,7 @@
 //   kick     <peer_id>                 (host) remove a peer and revoke its key
 //   log      [--n 20]                  recent messages sent/received from this machine
 //   close                              host: stop relay + tunnel and revoke all keys; peer: leave
+//   version                            agent-bridge version of this machine
 //
 // Global: --dir <state dir> (default ./.agent-bridge or $AGENT_BRIDGE_DIR), --json for machine-readable output.
 // Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running.
@@ -22,7 +24,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  PROTOCOL, DEFAULT_PORT, MAX_ATTACHMENT_BYTES, LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, pairProof,
+  PROTOCOL, SKILL_VERSION, compareVersions, ngrokErrorKind, DEFAULT_PORT, MAX_ATTACHMENT_BYTES, LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, pairProof,
   safeEqual, genKeyPair, deriveSessionKey, seal, open, requestAad, responseAad, resolveStateDir, ensureDir,
   readJson, writeJsonPrivate, appendJsonl, pidAlive, safeFileName,
 } from './lib.mjs';
@@ -85,7 +87,7 @@ async function fetchJson(url, init = {}, timeoutMs = 15_000) {
   try {
     res = await fetch(url, {
       ...init,
-      headers: { 'content-type': 'application/json', 'ngrok-skip-browser-warning': '1', 'user-agent': `agent-bridge/${PROTOCOL}`, ...(init.headers || {}) },
+      headers: { 'content-type': 'application/json', 'ngrok-skip-browser-warning': '1', 'user-agent': `agent-bridge/${SKILL_VERSION}`, 'x-ab-version': SKILL_VERSION, ...(init.headers || {}) },
       signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
@@ -187,13 +189,53 @@ function lanAddresses() {
   return Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
 }
 
+// A fresh winget/choco/scoop install is often not on PATH until a new shell starts, so look in the usual places too.
+function ngrokCandidates() {
+  if (opts['ngrok-bin'] && opts['ngrok-bin'] !== true) return [String(opts['ngrok-bin'])];
+  if (process.env.NGROK_BIN) return [process.env.NGROK_BIN];
+  const home = os.homedir();
+  const list = ['ngrok'];
+  if (process.platform === 'win32') {
+    const la = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
+    list.push(path.join(la, 'Microsoft', 'WinGet', 'Links', 'ngrok.exe'));
+    const pk = path.join(la, 'Microsoft', 'WinGet', 'Packages');
+    try { for (const d of fs.readdirSync(pk)) if (/^ngrok\.ngrok/i.test(d)) list.push(path.join(pk, d, 'ngrok.exe')); } catch {}
+    list.push('C:\\ProgramData\\chocolatey\\bin\\ngrok.exe', path.join(home, 'scoop', 'shims', 'ngrok.exe'));
+  } else {
+    list.push('/opt/homebrew/bin/ngrok', '/usr/local/bin/ngrok', '/usr/bin/ngrok', '/snap/bin/ngrok', path.join(home, '.local', 'bin', 'ngrok'));
+  }
+  return list;
+}
+
+let NGROK = undefined;
 function ngrokBin() {
-  return opts['ngrok-bin'] || process.env.NGROK_BIN || 'ngrok';
+  if (NGROK !== undefined) return NGROK;
+  NGROK = null;
+  for (const c of ngrokCandidates()) {
+    const r = spawnSync(c, ['version'], { encoding: 'utf8', windowsHide: true });
+    if (!r.error && r.status === 0) { NGROK = c; break; }
+  }
+  return NGROK;
 }
 
 function ngrokAvailable() {
-  const r = spawnSync(ngrokBin(), ['version'], { encoding: 'utf8', windowsHide: true });
-  return !r.error && r.status === 0;
+  return !!ngrokBin();
+}
+
+function ngrokFailure(raw) {
+  const msg = String(raw);
+  const first = msg.split('\n')[0];
+  const kind = ngrokErrorKind(msg);
+  if (kind === 'too_old') {
+    return `ngrok is too old for this account: ${first}\nUpdate it with \`"${ngrokBin()}" update\` (or reinstall from ngrok.com/download), then run host again.`;
+  }
+  if (kind === 'auth') {
+    return `ngrok is not signed in: ${first}\nThe user runs \`"${ngrokBin()}" config add-authtoken <token>\` themselves (token from dashboard.ngrok.com), then run host again. Or use --lan on the same network.`;
+  }
+  if (kind === 'busy') {
+    return `ngrok refused a second session: ${first}\nAnother ngrok agent is already running for this account (here or on another machine). Stop it, or use --lan.`;
+  }
+  return `ngrok failed: ${first}\nSee ${F.tunnelLog}. Or use --lan on the same network.`;
 }
 
 async function startNgrok(port) {
@@ -220,9 +262,9 @@ async function startNgrok(port) {
       }
       if (j.lvl === 'eror' || j.lvl === 'crit' || j.err) {
         const msg = j.err || j.msg;
-        if (msg && /authtoken|ERR_NGROK|failed|session/i.test(String(msg))) {
+        if (msg && /authtoken|ERR_NGROK|failed|session|too old/i.test(String(msg))) {
           try { process.kill(child.pid); } catch {}
-          die(`ngrok failed: ${String(msg).split('\n')[0]}\nIf ngrok is not signed in, run \`ngrok config add-authtoken <your token>\` yourself (token from dashboard.ngrok.com), then retry. Or use --lan on the same network.`);
+          die(ngrokFailure(msg));
         }
       }
     }
@@ -244,7 +286,7 @@ async function cmdHost() {
   if (existing && !existing.is_host) die(`${DIR} already holds a peer session (connected to ${existing.server}). Run \`close\` first or use another --dir.`);
 
   if (useNgrok && !ngrokAvailable()) {
-    die('ngrok is not installed or not on PATH.\n  Install: https://ngrok.com/download (Windows: `winget install ngrok.ngrok`), then `ngrok config add-authtoken <token>` once.\n  Or, if both devices are on the same network, run `host --role ' + role + ' --lan`.');
+    die('ngrok was not found (looked on PATH and in the usual install folders).\n  Install: https://ngrok.com/download (Windows: `winget install ngrok.ngrok`), then the user runs `ngrok config add-authtoken <token>` once.\n  If it is installed somewhere else, pass --ngrok-bin <path>.\n  Or, if both devices are on the same network, run `host --role ' + role + ' --lan`.');
   }
 
   let srv = readJson(F.server);
@@ -288,6 +330,8 @@ async function cmdHost() {
     pairing_code: code, pairing_expires_at: expires,
     connect_command: `/agent-bridge connect ${addr} --code ${code} --role <their role>`,
   };
+  const paired = Object.values(readJson(F.state, {})?.peers ?? {}).filter((p) => !p.is_host);
+  info.already_paired = paired.map((p) => ({ role: p.role, name: p.name }));
   out([
     `agent-bridge relay ${running ? 'already running' : 'started'} — this device is "${sess.role}"`,
     tunnel ? `  public url : ${tunnel.url}  (ngrok, HTTPS)` : null,
@@ -297,6 +341,7 @@ async function cmdHost() {
     '',
     'On the other device, run:',
     `  /agent-bridge connect ${addr} --code ${code} --role <their role, e.g. mobile>`,
+    paired.length && !running ? `\nAlready paired (${paired.map((p) => p.role).join(', ')}): they keep their keys and only need the new address:\n  /agent-bridge resume ${addr}` : null,
   ].filter((l) => l !== null).join('\n'), info);
 }
 
@@ -317,7 +362,7 @@ async function cmdConnect() {
   const name = opts.name && opts.name !== true ? String(opts.name) : `${role}@${os.hostname()}`;
   const r = await fetchJson(`${base}/pair`, {
     method: 'POST',
-    body: JSON.stringify({ protocol: PROTOCOL, role, name, client_pub: kp.pub, proof: pairProof(code, `pair|${kp.pub}`) }),
+    body: JSON.stringify({ protocol: PROTOCOL, client_version: SKILL_VERSION, role, name, client_pub: kp.pub, proof: pairProof(code, `pair|${kp.pub}`) }),
   });
   const transcript = `${kp.pub}|${r.server_pub}|${r.peer_id}`;
   if (!safeEqual(r.proof, pairProof(code, `pair-ok|${transcript}`))) {
@@ -334,7 +379,48 @@ async function cmdConnect() {
     `connected to ${base} as ${role} "${name}" [${r.peer_id}]`,
     `host: ${r.host.role} "${r.host.name}"`,
     `peers: ${peers.peers.map((p) => `${p.role}${p.id === r.peer_id ? ' (you)' : ''}`).join(', ')}`,
-  ].join('\n'), { connected: true, server: base, me: peers.me, peers: peers.peers });
+    ...versionNotes(peers.peers, r.peer_id),
+  ].join('\n'), { connected: true, server: base, me: peers.me, peers: peers.peers, version: SKILL_VERSION });
+}
+
+// ---------- resume ----------
+async function cmdResume() {
+  const sess = loadSession();
+  if (sess.is_host) die('the host does not resume: run `host` again (paired peers keep their keys) and give them the new address.');
+  const base = normalizeTarget(pos[0]);
+  const health = await fetchJson(`${base}/health`);
+  if (health.protocol !== PROTOCOL) die(`relay speaks ${health.protocol}, this client speaks ${PROTOCOL}`);
+  // Try the stored key against the new address before saving anything; an unknown key means the host closed the bridge.
+  const trial = { ...sess, server: base, clock_offset_ms: health.time - Date.now() };
+  const peers = await rpc(trial, 'peers');
+  writeJsonPrivate(F.session, { ...readJson(F.session), server: base, clock_offset_ms: trial.clock_offset_ms, resumed_at: new Date().toISOString() });
+  out([
+    `resumed: ${sess.role} "${sess.name}" now talks to ${base} (was ${sess.server})`,
+    `peers: ${peers.peers.map((p) => `${p.role}${p.online ? '' : ' (offline)'}${p.id === sess.peer_id ? ' (you)' : ''}`).join(', ')}`,
+    ...versionNotes(peers.peers, sess.peer_id),
+    'Start `wait` in the background again to keep listening.',
+  ].join('\n'), { resumed: true, server: base, previous: sess.server, peers: peers.peers });
+}
+
+function versionNotes(peers, meId) {
+  return (peers || [])
+    .filter((p) => p.id !== meId && compareVersions(p.version, SKILL_VERSION) !== 0)
+    .map((p) => `note: ${p.role} "${p.name}" runs agent-bridge ${p.version ?? 'older than 1.1 (unknown)'}, this machine runs ${SKILL_VERSION}. Their instructions may differ; ask them to update (git pull, or update the plugin).`);
+}
+
+function lastThread() {
+  if (!fs.existsSync(F.log)) return null;
+  const lines = fs.readFileSync(F.log, 'utf8').split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (!lines[i]) continue;
+    try { const m = JSON.parse(lines[i]); if (m.thread_id && m.from?.id !== 'bridge') return m.thread_id; } catch {}
+  }
+  return null;
+}
+
+function listenerRunning() {
+  const lock = readJson(F.lock);
+  return !!(lock?.pid && pidAlive(lock.pid));
 }
 
 // ---------- send ----------
@@ -363,6 +449,7 @@ async function cmdSend() {
   if (!type || !MESSAGE_TYPE_RE.test(String(type))) die('--type is required and must be snake_case, e.g. --type test_scenarios');
   const replyTo = opts['reply-to'] && opts['reply-to'] !== true ? opts['reply-to'] : null;
   let thread = opts.thread && opts.thread !== true ? opts.thread : null;
+  let reusedThread = false;
   let to = opts.to && opts.to !== true ? opts.to : null;
   if (replyTo) {
     const orig = findLocal(replyTo);
@@ -370,6 +457,11 @@ async function cmdSend() {
       thread ??= orig.thread_id;
       to ??= orig.direction === 'in' && orig.from.id !== 'bridge' ? orig.from.id : null;
     }
+  }
+  // Keep one conversation in one thread: without --thread/--reply-to, continue the last thread instead of opening none.
+  if (!thread && !replyTo && !opts['new-thread']) {
+    thread = lastThread();
+    reusedThread = !!thread;
   }
   let total = 0;
   const attachments = opts.file.filter((f) => f !== true).map((f) => {
@@ -383,7 +475,10 @@ async function cmdSend() {
   logLocal('out', { id: r.id, seq: r.seq, ts: new Date().toISOString(), from: { id: sess.peer_id, role: sess.role, name: sess.name }, ...msg, attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, size: fromB64u(a.data_b64).length })) });
   // Peers start reading from the moment they join, so a message nobody received is effectively dropped.
   const warn = r.recipients.length ? '' : '\nwarning: nobody else is connected, so nobody received this. Wait for a peer_joined notice and send it again.';
-  out(`sent ${type} ${r.id} (thread ${thread ?? '-'}) to ${msg.to} → ${r.recipients.length} recipient(s)${warn}`, { ...r, thread_id: thread });
+  const reused = reusedThread ? ` [continued the last thread; pass --thread <id> or --new-thread to start another]` : '';
+  const listening = listenerRunning();
+  const remind = listening ? '' : '\nreminder: no listener is running on this machine. Start `wait` in the background now, or replies will not wake you.';
+  out(`sent ${type} ${r.id} (thread ${thread ?? '-'}) to ${msg.to} → ${r.recipients.length} recipient(s)${reused}${warn}${remind}`, { ...r, thread_id: thread, listener_running: listening });
 }
 
 // ---------- receive ----------
@@ -406,7 +501,9 @@ function deliver(sess, messages) {
   });
   const latest = readJson(F.session);
   writeJsonPrivate(F.session, { ...latest, cursor: Math.max(latest.cursor ?? 0, ...messages.map((m) => m.seq)) });
-  out([`===== agent-bridge: ${messages.length} new message(s) for ${sess.role} =====`, ...blocks, '===== end ====='].join('\n'),
+  const joinNotes = messages.filter((m) => m.type === 'peer_joined').flatMap((m) => versionNotes([m.body?.peer], sess.peer_id));
+  out([`===== agent-bridge: ${messages.length} new message(s) for ${sess.role} =====`, ...blocks, ...joinNotes, '===== end =====',
+    'Next: handle these, reply with `send` (use --reply-to to stay in the thread), then start `wait` in the background again.'].join('\n'),
     { messages: messages.map((m) => ({ ...m, attachments: (m.attachments || []).map(({ name, mime, size }) => ({ name, mime, size })) })) });
 }
 
@@ -474,7 +571,9 @@ async function cmdStatus() {
   out([
     `this device: ${sess.role} "${sess.name}" [${sess.peer_id}]${sess.is_host ? ' — HOST' : ''}`,
     sess.is_host ? `relay: pid ${srv?.pid ?? '-'} on ${srv?.bind ?? '?'}:${srv?.port ?? '?'}${info.relay.public_url ? `, public ${info.relay.public_url}` : ''}${srv?.pairing_code ? `, open pairing code ${srv.pairing_code}` : ''}` : `relay: ${sess.server}`,
-    error ? `relay unreachable: ${error}` : `peers: ${peers.peers.map((p) => `${p.role} "${p.name}"${p.online ? '' : ' (offline)'}${p.id === sess.peer_id ? ' (you)' : ''}`).join(', ')}`,
+    `agent-bridge ${SKILL_VERSION}`,
+    error ? `relay unreachable: ${error}` : `peers: ${peers.peers.map((p) => `${p.role} "${p.name}" ${p.version ?? '<1.1'}${p.online ? '' : ' (offline)'}${p.id === sess.peer_id ? ' (you)' : ''}`).join(', ')}`,
+    ...(peers ? versionNotes(peers.peers, sess.peer_id) : []),
     unread !== null ? `unread: ${unread}` : null,
     `listener: ${listening ? `running (pid ${lock.pid})` : 'not running — start `wait` in the background to receive messages'}`,
   ].filter(Boolean).join('\n'), info);
@@ -530,7 +629,8 @@ async function cmdClose() {
 }
 
 // ---------- main ----------
-const commands = { host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
+const cmdVersion = () => out(`agent-bridge ${SKILL_VERSION} (protocol ${PROTOCOL})`, { version: SKILL_VERSION, protocol: PROTOCOL });
+const commands = { version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
 const fn = commands[command];
 if (!fn) {
   const usage = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1).filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n');

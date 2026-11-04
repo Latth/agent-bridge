@@ -5,6 +5,30 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 export const PROTOCOL = 'agent-bridge/1';
+// Skill/CLI release. The wire protocol above stays compatible; this tells peers which instructions the other side has.
+export const SKILL_VERSION = '1.1.0';
+
+/**
+ * Classifies an ngrok error line. "too old" is checked first: ngrok words it as an authentication
+ * failure, which used to send people to the authtoken instead of `ngrok update`.
+ */
+export function ngrokErrorKind(msg) {
+  const m = String(msg ?? '');
+  if (/too old|minimum supported agent version|ERR_NGROK_121/i.test(m)) return 'too_old';
+  if (/authtoken|ERR_NGROK_4018|ERR_NGROK_105|ERR_NGROK_107/i.test(m)) return 'auth';
+  if (/ERR_NGROK_108|simultaneous|limited to 1/i.test(m)) return 'busy';
+  return 'other';
+}
+
+/** -1 / 0 / 1 for dotted numeric versions; unknown (null) sorts lowest. */
+export function compareVersions(a, b) {
+  const pa = String(a ?? '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b ?? '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    if ((pa[i] ?? 0) !== (pb[i] ?? 0)) return (pa[i] ?? 0) < (pb[i] ?? 0) ? -1 : 1;
+  }
+  return 0;
+}
 export const DEFAULT_PORT = 7878;
 export const MAX_BODY_BYTES = 8 * 1024 * 1024;        // whole HTTP body (base64 + JSON overhead included)
 export const MAX_ATTACHMENT_BYTES = 5 * 1024 * 1024;  // raw bytes, all attachments of one message
