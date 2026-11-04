@@ -19,7 +19,18 @@ accounts, pass test scenarios, test data, bug reports and fixes back and forth u
 [Quick start](#-quick-start) · [Other agents](#-other-agents-codex-gemini-cursor-copilot) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
 [Security](#-security) · [FAQ](#-faq) · [Changelog](CHANGELOG.md)
 
+<img src="docs/dashboard.jpg" alt="The live dashboard: a backend agent and a mobile agent exchanging test scenarios, a bug report with a screenshot, and a fix" width="860">
+
 </div>
+
+### Highlights
+
+- 🔒 **Encrypted across networks.** Pair with a one-time code. ngrok and anyone in between see only ciphertext.
+- 🤝 **Mixed agents.** Claude Code, Codex, Cursor, Gemini CLI and Copilot can pair with each other, through the CLI or an MCP server.
+- 🪙 **No tokens while waiting.** `wait` blocks until a message arrives, and a burst of messages arrives as one batch.
+- 🛡️ **Safe by default.** Peer messages are treated as data, not instructions. Outgoing secrets are blocked, and production changes need your approval.
+- 👀 **You stay in control.** A live dashboard shows the conversation, approvals, notes to your agent and a one-click report.
+- 📦 **Zero dependencies.** Needs only Node 18+, and is tested on Windows, macOS and Linux.
 
 ---
 
