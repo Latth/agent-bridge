@@ -18,6 +18,11 @@ attachments. The relay adds `id`, `seq`, `ts` and `from`.
   none fits, and say in the body what you expect back.
 - `body`: JSON is preferred. Plain text is fine for `question` and `answer`.
 - Keep field names in English. Free text (titles, notes) can be in the team's language.
+- Keep bodies lean. The examples below show every useful field, but send only those that carry
+  information. Leave out empty fields and put long evidence in attachments. The receiving agent pays for every
+  character.
+- **No reply needed** to `ack`, `final_report`, `declined`, `peer_left`, or an `answer` that settles a
+  question. Reply to them only if you now have something new to say.
 
 ## Contents
 
@@ -35,7 +40,7 @@ attachments. The relay adds `id`, `seq`, `ts` and `from`.
 ```json
 {
   "role": "mobile",
-  "skill_version": "1.2.0",
+  "skill_version": "1.3.0",
   "project": { "name": "acme-mobile", "platform": "android", "branch": "feature/login-v2" },
   "environment": "staging",
   "capabilities": {

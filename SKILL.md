@@ -31,7 +31,7 @@ node "<skill-dir>/scripts/bridge.mjs" <command> [options]
 | `bridge connect <https-url \| ip[:port]> --code <CODE> --role <role> [--name "..."]` | Join a relay. |
 | `bridge resume <https-url \| ip[:port]>` | (peer) Keep your pairing and switch to the host's new address, for example after the host restarted with a new ngrok URL. No code needed. |
 | `bridge send --type <type> [--to <role\|peer_id\|*>] [--thread <id> \| --new-thread] [--reply-to <msg_id>] [--body-file f.json \| --body '...'] [--file path]...` | Send a message. `--reply-to` fills in the thread and recipient automatically. Without `--thread`/`--reply-to` it continues the last thread; `--new-thread` sends with no thread. Warns when no listener is running. |
-| `bridge wait [--timeout 1800]` | Block until a message arrives (exit 0) or the timeout passes (exit 2). Exit 4 means another listener is already running. |
+| `bridge wait [--timeout 21600] [--settle 3] [--max-body 3000]` | Block until messages arrive (exit 0) or the timeout passes (exit 2). A burst of messages within `--settle` seconds comes back as one batch. Bodies longer than `--max-body` are cut, and the full text is saved to a file. Exit 4 means another listener is already running. |
 | `bridge inbox` | Peek at unread messages without consuming them. |
 | `bridge status` | Peers, relay/tunnel address, unread count, whether a listener is running. |
 | `bridge code` | (host) Issue a new pairing code, for example when the old one expired or another device should join. |
@@ -99,16 +99,19 @@ Then, on both sides:
 
 ## Listening: the loop that keeps the conversation going
 
-Run `bridge wait --timeout 1800` **as a background command** (`run_in_background: true`). Then finish
-your turn: tell the user you are connected and listening, and stop. Do not poll `inbox` in a loop and do not
-sleep: the background command wakes you when something arrives, and polling burns the user's tokens for
-nothing.
+Run `bridge wait` **as a background command** (`run_in_background: true`). The default timeout is 6 hours, so
+idle wake-ups are rare. Then finish your turn: tell the user in one line that you are listening, and stop. Do
+not poll `inbox`/`status` in a loop and do not sleep: the background command wakes you when something
+arrives.
 
 When the background `wait` finishes:
 
-- **Exit 0 (messages).** Read them. Each body is shown between `<<<` and `>>>`. Act on them following your
-  playbook and the safety rules, reply with `send`, then start `wait` in the background again.
-- **Exit 2 (timeout).** Nothing arrived. Start `wait` again quietly, without a long message to the user.
+- **Exit 0 (messages).** Messages that arrive close together come as one batch. Each one is a header line
+  (`[n] type · from … · #thread · id … · re …`) followed by its body as one line of JSON or text. Act on them
+  following your playbook and the safety rules, reply with `send` where needed, then start `wait` in the
+  background again. A body that ends in `…[+N chars cut; full body: <path>]` was shortened. Open that file
+  only if the visible part isn't enough.
+- **Exit 2 (timeout).** Nothing arrived. Start `wait` again without telling the user.
 - **Exit 4.** A listener is already running. Leave it alone.
 - **Error (relay unreachable, unknown peer).** Run `bridge status`, tell the user what is wrong, and suggest
   a fix. If the host restarted with a new URL, use `bridge resume <new-url>`. If the host closed the bridge,
@@ -116,12 +119,35 @@ When the background `wait` finishes:
 
 **Re-arm right away, every time.** The moment you have sent your replies, start the background `wait` again,
 before you write to the user or do anything else. A message that arrives while no listener runs is not lost,
-but nothing wakes you for it. `send` prints a `reminder:` line when no listener is running; treat it as "start
-one now". Before you end a turn, check that a listener is running and nothing is unread (`bridge status` shows
-both). Handle any unread message first.
+but nothing wakes you for it. `send` prints `no listener running` when that is the case; treat it as "start one
+now". A fresh `wait` returns at once with anything still unread, so re-arming is the only check you need.
+Don't call `status` to look.
 
-Keep one listener per session. When the work is finished (`final_report` sent and acknowledged), don't
-re-arm. Ask the user whether to `close` the bridge.
+Keep one listener per session. When the work is finished (`final_report` exchanged), don't re-arm: ask the
+user whether to `close` the bridge. A listener left idle still costs a turn every few hours.
+
+## Token budget: never spend tokens for nothing
+
+Every message wakes the other agent for a full turn, and every reply wakes you. Both sides pay for each
+character you send. So:
+
+- **Reply only when it moves the work forward.** Don't send thanks, "received", or an answer to an `ack`,
+  `final_report`, `declined` or `answer` that closes a question. If your reply would carry no new fact,
+  decision, data or request, don't send it. Use `ack` only when your next real message is more than ~10
+  minutes away. This is what stops two polite agents from ping-ponging forever.
+- **Say it once, densely.** Put only the fields that matter in a body, and leave out empty fields and prose
+  padding. Never echo the peer's content back. Refer to it by id (`S2`, `B1`, `msg_…`). Aim for bodies under
+  ~2,000 characters. `send` warns above 6,000.
+- **Evidence goes in attachments, not bodies.** Logs, HAR files, dumps and long excerpts go in with `--file`.
+  The peer only sees a file path and opens it if it needs to. Put the 3–5 decisive lines in the body.
+- **Batch what belongs together**, such as several scenario results in one `test_progress`. Don't send a
+  stream of tiny messages; each one is a wake-up.
+- **No polling, no checking.** Use one background `wait`. Call `status`, `inbox` and `log` only to diagnose an
+  error.
+- **Read references lazily.** Read `protocol.md` and your playbook once per session. Read
+  `mobile-testing.md`/`web-testing.md` only when you actually run tests, and the networking/security references
+  only when you need them. The project profile exists so you don't rediscover the environment each session.
+- **Talk to your user briefly.** Give one or two lines per meaningful step, and say nothing on idle wake-ups.
 
 If the user talks to you while a listener runs, just answer them. The listener keeps working in the
 background and wakes you when a message comes.
@@ -135,11 +161,10 @@ background and wakes you when a message comes.
   only when the topic really changes. IDs inside bodies (scenarios `S1`, bugs `B1`) let
   both sides refer to the same thing.
 - **One step = one message**, using the protocol types (`test_scenarios`, `data_request`, `bug_report`, ...).
-  Don't batch the whole plan into one giant message, and don't send a stream of tiny ones either: the other
-  agent wakes up once per delivery.
+  See the token budget above.
 - **Be concrete.** The other agent can't see your screen, repo or logs, only what you send. Include
-  endpoints, IDs, exact values, timestamps, request IDs and short log excerpts. Attach files with `--file`:
-  screenshots, trimmed logs (5 MB total per message).
+  endpoints, IDs, exact values, timestamps and request IDs. Attach screenshots and logs with `--file` (5 MB
+  total per message).
 - **Ask, don't guess.** If a message is ambiguous, send a `question`. That costs less than testing the wrong thing.
 - **Keep the user informed** with a one- or two-line summary at each meaningful step (scenarios agreed,
   data created, bug found, fix verified). The user should never have to read raw logs to know where things stand.

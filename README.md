@@ -7,11 +7,11 @@
 A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
 accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
-[![version](https://img.shields.io/badge/version-1.2.0-2563eb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.3.0-2563eb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
-[![tests](https://img.shields.io/badge/tests-28%20passing-16a34a)](tests)
+[![tests](https://img.shields.io/badge/tests-33%20passing-16a34a)](tests)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20plugin-d97757)](https://claude.com/claude-code)
 
 [Quick start](#-quick-start) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
@@ -133,7 +133,8 @@ flowchart LR
 |---|---|
 | **Relay** (`scripts/bridge-server.mjs`) | A small HTTP server on the host. It queues messages per recipient and keeps a log. Plain Node.js, no dependencies. |
 | **CLI** (`scripts/bridge.mjs`) | What the agents run: `host`, `connect`, `send`, `wait`, `resume`, `status`, ... |
-| **Listening** | A Claude session only runs on its turn, so the agent runs `bridge wait` in the background. It long-polls and exits the moment a message arrives, which **wakes the session**. No polling loops, no wasted tokens. |
+| **Listening** | A Claude session only runs on its turn, so the agent runs `bridge wait` in the background. It long-polls and exits the moment a message arrives, which **wakes the session**. There are no polling loops. |
+| **Token budget** | Every wake-up is a full turn, so wake-ups are kept few and small. A burst of messages arrives as **one** batch, the output is compact (one header line plus single-line JSON per message), long bodies are cut with the full text saved to a file, and idle wake-ups come every 6 h at most. The skill also tells agents never to send replies that carry nothing new (thanks, "received", ack-of-ack), so two agents can't ping-pong. In a 3-message burst this cut the cost from 3 turns and 6.0k characters to **1 turn and 3.7k characters**. |
 | **Protocol** | Typed messages, one per step: `hello`, `test_scenarios`, `data_request`, `bug_report`, `fix_ready`, `declined`, `final_report`, ... See [references/protocol.md](references/protocol.md). |
 | **Playbooks** | What each role does at each step: [backend](references/roles/backend.md), [mobile](references/roles/mobile.md) (adb, logcat, iOS Simulator), [frontend](references/roles/frontend.md) (Playwright, HAR, console). |
 | **Project profile** | On first use each agent records its environment in `.claude/agent-bridge-profile.md`: staging URL, how test data is made, logcat tag, browser. The next session doesn't ask again. |
@@ -148,7 +149,7 @@ The agent runs these for you. You only need them for debugging.
 | `connect <url\|ip:port> --code <CODE> --role <role>` | Join a relay |
 | `resume <url\|ip:port>` | Keep your pairing and switch to the host's new address |
 | `send --type <type> [--to <role>] [--reply-to <id>] [--body-file f.json] [--file x.png]` | Send a message. Without `--thread` it continues the conversation's thread |
-| `wait [--timeout 1800]` | Wait for the next message (exit `0`) or a timeout (exit `2`) |
+| `wait` | Wait for messages (a burst comes as one batch, long bodies are cut) or a 6 h timeout |
 | `status` · `inbox` · `log` | Peers and versions, unread messages, history |
 | `code` · `kick <peer>` · `close` | (host) New pairing code, remove a peer, end the bridge and revoke all keys |
 | `dashboard [--open] [--stop]` | Local, live, read-only web view of the conversation |
@@ -182,7 +183,7 @@ personal data. Details are in [references/security.md](references/security.md).
 
 | | |
 |---|---|
-| ✅ **Relay, CLI and dashboard** | 28 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, and the dashboard's token, Host check, key hygiene, file paths and live stream (`node --test tests/*.test.mjs`) |
+| ✅ **Relay, CLI and dashboard** | 33 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, and the token budget (batching, compact output, body cut-offs) (`node --test tests/*.test.mjs`) |
 | ✅ **Agent behavior** | 4 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report. **26/26 checks with the skill, 19/26 without** ([eval harness](tests/eval-harness/README.md)) |
 | ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
 | ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |

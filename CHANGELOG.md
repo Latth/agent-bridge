@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.3.0: token budget
+
+Measured with `node tests/token-measure.mjs`, where the peer sends a bug report, a progress update and an ack
+in a burst. The listening agent went from **3 wake-ups and 6,026 characters to 1 wake-up and 3,687
+characters**.
+
+- **Batched delivery.** After the first message arrives, `wait` keeps collecting while more arrive within
+  `--settle` seconds (default 3, capped), so a burst costs one turn instead of one turn per message.
+- **Compact output.** Each message gets one header line (`[n] type · from … · #thread · id … · re …`) and its
+  body as single-line JSON. The output has one data/instructions notice per batch instead of one per message,
+  and a short footer.
+- **Body cut-off.** Bodies longer than `--max-body` (default 3,000 chars) are cut in the output, and the full
+  body is saved to `inbox/<id>/body.json` for the agent to open only if needed.
+- **Fewer idle wake-ups.** The default `wait` timeout went from 10 min (SKILL.md said 30 min) to 6 h.
+- **Oversized sends are flagged.** `send` notes bodies over 6,000 chars and suggests attachments. Its own
+  output is shorter too.
+- **SKILL.md "Token budget" rules.** Reply only when it moves the work forward (no thanks, "received", or
+  replies to `ack`/`final_report`/`declined`), so two agents can't loop. Keep bodies dense, refer to items by
+  id instead of echoing them, put evidence in attachments, don't poll `status`, and read references only
+  when needed. The "check status before ending a turn" step is gone: re-arming `wait` already returns
+  anything unread. `protocol.md` lists the types that need no reply.
+- 5 new tests (33 total) and `tests/token-measure.mjs`.
+
 ## 1.2.0
 
 - **Dashboard.** `bridge dashboard [--open]` starts a local, live, read-only web view of the conversation:

@@ -66,9 +66,8 @@ test('send reminds when no listener runs, and keeps the conversation in one thre
   assert.equal(first.code, 0, first.stderr);
   assert.equal(first.json.listener_running, false);
   const firstText = await run(B, 'send', '--type', 'note', '--to', 'backend', '--body', 'x');
-  assert.match(firstText.stdout, /reminder: no listener is running/);
-  assert.match(firstText.stdout, /continued the last thread/);
-  assert.match(firstText.stdout, /\(thread smoke\)/);
+  assert.match(firstText.stdout, /no listener running/);
+  assert.match(firstText.stdout, /\(#smoke, continued\)/);
   const fresh = await run(B, 'send', '--type', 'note', '--to', 'backend', '--new-thread', '--body', 'y', '--json');
   assert.equal(fresh.json.thread_id, null);
   // a listener in the background silences the reminder (drain the host's unread messages first,
@@ -77,7 +76,7 @@ test('send reminds when no listener runs, and keeps the conversation in one thre
   const listening = run(A, 'wait', '--timeout', '8');
   await sleep(700);
   const quiet = await run(A, 'send', '--type', 'note', '--to', 'mobile', '--body', 'z');
-  assert.doesNotMatch(quiet.stdout, /reminder/);
+  assert.doesNotMatch(quiet.stdout, /no listener running/);
   await listening;
 });
 
