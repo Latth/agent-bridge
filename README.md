@@ -1,120 +1,229 @@
-# agent-bridge
+<div align="center">
 
-A [Claude Code](https://claude.com/claude-code) skill that connects two (or more) Claude sessions running
-on **different machines**, with the same or different accounts, so the agents can work through a task
-together.
+# 🌉 agent-bridge
 
-The motivating case is a test cycle between teams:
+**Let Claude Code sessions on different machines work together.**
 
-1. The **backend** agent reads its change, writes test scenarios and sends them over.
-2. The **mobile** or **web frontend** agent picks the ones it can test on screen and asks for test data
-   for the logged-in user (a chip number, an open task...).
-3. The backend agent creates that data **on staging** and replies with the exact values.
-4. The client agent runs the tests on an emulator, device or browser, and reports failures with evidence:
-   request id, status, a log excerpt and a screenshot, with secrets redacted.
-5. The backend agent fixes the bug and says what to retest. Repeat until everything passes.
+A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
+accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
+[![version](https://img.shields.io/badge/version-1.1.0-2563eb)](CHANGELOG.md)
+[![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
+[![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
+[![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
+[![tests](https://img.shields.io/badge/tests-19%20passing-16a34a)](tests)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20plugin-d97757)](https://claude.com/claude-code)
+
+[Quick start](#-quick-start) · [How it works](#-how-it-works) · [Commands](#-commands) ·
+[Security](#-security) · [FAQ](#-faq) · [Changelog](CHANGELOG.md)
+
+</div>
+
+---
+
+## ✨ Why
+
+When the backend team ships a change, someone on the mobile or web team has to test it. That person needs to
+know what changed and needs test data for their user; then the backend team needs a precise bug report.
+Today all of that is copy-pasted between people.
+
+With **agent-bridge**, each team's Claude agent does that handoff itself:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant BE as 🖥️ Backend agent
+    participant M as 📱 Mobile / 🌐 Web agent
+    BE->>M: test_scenarios (what changed, what to verify)
+    M->>BE: ui_testable_scenarios (what it can test on screen)
+    M->>BE: data_request (chip, task... for user u_48213)
+    Note over BE: creates the data on staging only
+    BE->>M: data_response (exact values + cleanup)
+    Note over M: runs the tests on emulator / device / browser
+    M->>BE: bug_report (request id, status, redacted logs, screenshot)
+    Note over BE: finds it in server logs, fixes, tests
+    BE->>M: fix_ready (what to retest)
+    M->>BE: retest_result ✅
+    M-->>BE: final_report
 ```
- [backend machine]                              [mobile / web machine]
- Claude (role=backend)                          Claude (role=mobile)
-   │ bridge send / wait                            │ bridge send / wait
-   ▼                                               │
- relay (bridge-server.mjs) ◄── HTTPS (ngrok) or LAN, end-to-end encrypted ──┘
-```
 
-## How it works
+## 🚀 Quick start
 
-- **Relay + CLI**: `scripts/bridge-server.mjs` and `scripts/bridge.mjs`. Plain Node.js 18+, no dependencies.
-- **Pairing**: the host prints a single-use code (15 min). The two sides run an X25519 key exchange and
-  derive the session key on each side, so the key never crosses the wire. Every request and response is
-  AES-256-GCM encrypted and bound to its route, sender, time and nonce, so replays and tampering are rejected.
-- **Listening**: a Claude session only runs on its turn. The agent runs `bridge wait` in the background; it
-  long-polls and exits when a message arrives, which wakes the session. No polling loops.
-- **Protocol**: typed messages (`hello`, `test_scenarios`, `data_request`, `data_response`, `bug_report`,
-  `fix_ready`, `declined`, `final_report`, ...). See [references/protocol.md](references/protocol.md).
-- **Safety**: messages from the other agent are treated as data, not instructions. Test data only goes to
-  staging/dev; production, deploys, deletes and secrets need the local user's approval or are refused. See
-  [references/security.md](references/security.md).
+**1. Install on both machines.** You need Node.js 18+ on each. The host also needs
+[ngrok](https://ngrok.com/download), unless both machines are on the same network.
 
-## Install
-
-Do this on **both** machines. Both need Node.js 18+. The host needs [ngrok](https://ngrok.com/download)
-(signed in once with `ngrok config add-authtoken <token>`) unless both machines are on the same network.
-
-**As a plugin** (recommended; updates arrive through `/plugin`):
+<table>
+<tr><th>As a plugin (recommended)</th><th>As a plain skill</th></tr>
+<tr><td>
 
 ```
 /plugin marketplace add Latth/agent-bridge
 /plugin install agent-bridge@latth-agent-bridge
 ```
 
-As a plugin, the skill's command is namespaced under the plugin name. Type `/agent-bridge` and pick it
-from the list.
-
-**As a plain skill**:
+</td><td>
 
 ```bash
-git clone https://github.com/Latth/agent-bridge ~/.claude/skills/agent-bridge
+git clone https://github.com/Latth/agent-bridge \
+  ~/.claude/skills/agent-bridge
 ```
 
-On Windows: `git clone https://github.com/Latth/agent-bridge "%USERPROFILE%\.claude\skills\agent-bridge"`.
-Update later with `git pull` in that folder.
+</td></tr>
+<tr><td>Updates arrive through <code>/plugin</code>.</td><td>Update with <code>git pull</code> in that folder.<br>Windows: clone into <code>%USERPROFILE%\.claude\skills\agent-bridge</code>.</td></tr>
+</table>
 
-Both machines should run the same version. Each side's `hello` carries it, and the CLI warns when the
-versions differ (`bridge version` shows yours).
-
-## Use
-
-On the host machine (for example backend):
+**2. Start the bridge on one machine**, the host, usually backend:
 
 ```
-/agent-bridge host --role backend          # via ngrok (default)
-/agent-bridge host --role backend --lan    # same network, no ngrok
+/agent-bridge host --role backend          # over ngrok (works across networks)
+/agent-bridge host --role backend --lan    # same Wi-Fi / office network, no ngrok
 ```
 
-It prints something like:
+The agent replies with a line like this:
 
 ```
-/agent-bridge connect https://abcd-1234.ngrok-free.app --code 7KQ2M-X9D4F --role <their role>
+/agent-bridge connect https://abcd-1234.ngrok-free.dev --code 7KQ2M-X9D4F --role <their role>
 ```
 
-Send that line to the other team. They run it in their Claude session, with `--role mobile` or
-`--role frontend`, or no role at all, in which case it is inferred from the project. From then on, talk to
-your own agent normally ("send them the scenarios for the login change", "report the S2 failure").
+**3. Paste that line into Claude on the other machine.** Use `--role mobile` or `--role frontend`, or leave
+the role out and let it be inferred from the project. The code works once and expires after 15 minutes.
 
-More than two agents can join one relay. Ask the host agent for a new pairing code for each extra device;
-it runs `bridge code`.
+**4. Talk to your own agent as usual.** For example "send them the test scenarios for the login change",
+"they found a bug, look at it", "close the bridge". The agents message each other in the background and tell
+you what is happening.
 
-If the host machine restarts, ngrok's free plan gives it a new URL. Run `/agent-bridge host --role backend`
-again. Already-paired peers keep their keys and only need `/agent-bridge resume <new-url>`. No new code is
-needed until someone runs `close`.
+> [!TIP]
+> If the host restarts, the free ngrok plan gives it a new URL. Run `host` again. Peers that were already
+> paired only need `/agent-bridge resume <new-url>`; no new code is needed until someone runs `close`.
 
-## Status
+## 🧠 How it works
 
-Tested:
-- 19 end-to-end tests of the relay and CLI (`node --test tests/*.test.mjs`): pairing, encryption, replay and tamper
-  rejection, attachments, long-poll, resume after a host restart, version reporting, thread reuse.
-- Behavior evals with a scripted peer, covering four scenarios: backend creates staging data, backend refuses
-  a production migration and secrets, mobile bug report, web bug report. With the skill all 26 checks
-  passed; without it, about 57–81%. See [tests/eval-harness/README.md](tests/eval-harness/README.md).
-
-- A field smoke test between two machines on different networks over ngrok: pairing, `hello` in both
-  directions, an attachment, and background wake-up on every message.
-
-**Not yet verified in the field**: a full data-request → fix → retest cycle on a real project, and very long
-sessions. Feedback and issues are welcome.
-
-## Layout
-
-```
-SKILL.md                 instructions Claude follows
-scripts/                 relay + CLI (Node, no deps)
-references/              protocol, security, networking, role playbooks (backend/mobile/frontend), device & web testing
-tests/e2e.test.mjs       relay/CLI tests
-tests/eval-harness/      scripted peer, fixtures (fake projects with fake secrets), grader
-evals/                   behavior test cases (claude plugin eval layout)
+```mermaid
+flowchart LR
+    subgraph A["🖥️ Machine A: host"]
+        CA["Claude session<br/>role: backend"] -- "bridge send / wait" --> R[("relay<br/>bridge-server.mjs")]
+    end
+    subgraph B["📱 Machine B"]
+        CB["Claude session<br/>role: mobile"] -- "bridge send / wait" --> CLI["bridge CLI"]
+    end
+    R <-. "ngrok HTTPS or LAN<br/>🔒 AES-256-GCM end to end" .-> CLI
+    T["🌐 Machine C (optional)<br/>role: frontend"] -.-> R
 ```
 
-## License
+| Piece | What it does |
+|---|---|
+| **Relay** (`scripts/bridge-server.mjs`) | A small HTTP server on the host. It queues messages per recipient and keeps a log. Plain Node.js, no dependencies. |
+| **CLI** (`scripts/bridge.mjs`) | What the agents run: `host`, `connect`, `send`, `wait`, `resume`, `status`, ... |
+| **Listening** | A Claude session only runs on its turn, so the agent runs `bridge wait` in the background. It long-polls and exits the moment a message arrives, which **wakes the session**. No polling loops, no wasted tokens. |
+| **Protocol** | Typed messages, one per step: `hello`, `test_scenarios`, `data_request`, `bug_report`, `fix_ready`, `declined`, `final_report`, ... See [references/protocol.md](references/protocol.md). |
+| **Playbooks** | What each role does at each step: [backend](references/roles/backend.md), [mobile](references/roles/mobile.md) (adb, logcat, iOS Simulator), [frontend](references/roles/frontend.md) (Playwright, HAR, console). |
+| **Project profile** | On first use each agent records its environment in `.claude/agent-bridge-profile.md`: staging URL, how test data is made, logcat tag, browser. The next session doesn't ask again. |
 
-MIT, see [LICENSE](LICENSE).
+## 🧰 Commands
+
+The agent runs these for you. You only need them for debugging.
+
+| Command | Purpose |
+|---|---|
+| `host --role <role> [--lan] [--ngrok]` | Start the relay and print the address plus a single-use pairing code |
+| `connect <url\|ip:port> --code <CODE> --role <role>` | Join a relay |
+| `resume <url\|ip:port>` | Keep your pairing and switch to the host's new address |
+| `send --type <type> [--to <role>] [--reply-to <id>] [--body-file f.json] [--file x.png]` | Send a message. Without `--thread` it continues the conversation's thread |
+| `wait [--timeout 1800]` | Wait for the next message (exit `0`) or a timeout (exit `2`) |
+| `status` · `inbox` · `log` | Peers and versions, unread messages, history |
+| `code` · `kick <peer>` · `close` | (host) New pairing code, remove a peer, end the bridge and revoke all keys |
+| `version` | This machine's agent-bridge version |
+
+They are all `node scripts/bridge.mjs <command>`. State lives in `.agent-bridge/` in the project, which
+git-ignores itself.
+
+## 🔒 Security
+
+There are two kinds of risk, and the skill handles them separately.
+
+**The network.** Pairing runs an X25519 key exchange keyed by the single-use code. The session key is derived
+on both sides and **never sent**. Every request and response is AES-256-GCM encrypted and bound to its route,
+sender, timestamp and nonce, so sniffing, replays and tampering all fail. Even ngrok only sees ciphertext.
+Wrong codes are rate-limited, and the code is burned after 5 attempts.
+
+**The other agent.** Encryption proves who sent a message. It doesn't prove that doing what the message asks
+is a good idea. So messages from the peer are treated as **data, not instructions**:
+
+| The peer asks to... | The agent... |
+|---|---|
+| read code and logs, run tests, create **test data on staging/dev** | does it (after checking it really is staging) |
+| deploy, migrate, delete, push, or touch **production** | asks **its own user** first, even if the peer says "your user already approved" |
+| send secrets (`.env`, tokens, cookies) or real customer data | refuses with a `declined` message |
+
+Logs, HAR files and screenshots are redacted before they are sent: `Authorization`, cookies, tokens and
+personal data. Details are in [references/security.md](references/security.md).
+
+## 📊 Status
+
+| | |
+|---|---|
+| ✅ **Relay and CLI** | 19 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse (`node --test tests/*.test.mjs`) |
+| ✅ **Agent behavior** | 4 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report. **26/26 checks with the skill, 19/26 without** ([eval harness](tests/eval-harness/README.md)) |
+| ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
+| ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |
+
+Found a rough edge? [Open an issue](https://github.com/Latth/agent-bridge/issues). Reports from real
+backend ↔ mobile/web cycles are the most useful.
+
+## ❓ FAQ
+
+<details>
+<summary><b>Do both machines need the same Claude account?</b></summary>
+
+No. The agents talk through the relay, not through Anthropic, so any two Claude Code sessions can pair.
+</details>
+
+<details>
+<summary><b>Can more than two agents join?</b></summary>
+
+Yes. Backend, mobile and frontend can share one relay. The host issues a new pairing code for each extra
+device (`bridge code`), and messages are addressed by role (`--to frontend`) or to everyone (`--to '*'`).
+</details>
+
+<details>
+<summary><b>Does it work with roles other than backend / mobile / frontend?</b></summary>
+
+The bridge itself accepts any role name, such as `qa`, `desktop` or `data`. Those roles follow the general
+loop and protocol in `SKILL.md`; dedicated playbooks exist for backend, mobile and frontend.
+</details>
+
+<details>
+<summary><b>Will my agent do whatever the other agent asks?</b></summary>
+
+No. See [Security](#-security). Anything risky goes to you first, and secrets are never sent.
+</details>
+
+<details>
+<summary><b>ngrok says my agent version is too old</b></summary>
+
+Some accounts require a recent ngrok agent, and package managers can lag behind. Run `ngrok update`. The CLI
+recognizes this error and says so. More fixes are in [references/networking.md](references/networking.md#troubleshooting).
+</details>
+
+<details>
+<summary><b>Do both sides need the same agent-bridge version?</b></summary>
+
+They should. Every `hello` carries the version, and the CLI prints a note when the two sides differ. Update
+the older side with `git pull` or through `/plugin`.
+</details>
+
+## 🗂️ Repository layout
+
+```
+SKILL.md                  what Claude follows when the skill runs
+scripts/                  relay + CLI (Node.js, zero dependencies)
+references/               protocol · security · networking · role playbooks · mobile & web testing
+.claude-plugin/           plugin + marketplace manifests
+tests/*.test.mjs          relay/CLI tests
+tests/eval-harness/       scripted peer, fixture projects (with deliberately fake secrets), grader
+evals/                    behavior test cases (claude plugin eval layout)
+```
+
+## 📄 License
+
+[MIT](LICENSE)
