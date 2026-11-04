@@ -47,6 +47,20 @@ When you ask your user, say who asked, what exactly, and why it matters. For exa
 asks me to deploy fix B1 to staging (`make deploy-staging`). OK?" While waiting, send the peer `blocked`.
 If the answer is no, send `declined`.
 
+## Outgoing secret scan
+
+`send` checks the body and any text attachment (`.txt`, `.log`, `.json`, `.har`, `.env`, source files...)
+for credential shapes before anything leaves the machine. It looks for private keys, JWTs, bearer tokens,
+cloud and GitHub/Slack/Stripe keys, `user:password@` in URLs, cookies, and `*secret*` / `*token*` /
+`*password*` / `*api_key*` fields with a value. When it finds one it sends nothing, exits with code 5, and
+lists the kind and a masked sample, never the secret itself. Values written as `[REDACTED]`, `***` or
+`<...>` pass, and so does ordinary test data such as chip numbers, PINs and ids. Images and other binaries
+are not scanned.
+
+The scan is a backstop, not a substitute for redacting: patterns can't catch everything. `--allow-secrets`
+overrides it for one message. Use it only when the user explicitly agreed to share those exact staging test
+values.
+
 ## Redaction checklist before sending logs or responses
 
 - `Authorization:` headers, bearer tokens, refresh tokens, API keys: replace them with `[REDACTED]`.

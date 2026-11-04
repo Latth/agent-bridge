@@ -6,7 +6,7 @@ import path from 'node:path';
 
 export const PROTOCOL = 'agent-bridge/1';
 // Skill/CLI release. The wire protocol above stays compatible; this tells peers which instructions the other side has.
-export const SKILL_VERSION = '1.3.0';
+export const SKILL_VERSION = '1.4.0';
 
 /**
  * Classifies an ngrok error line. "too old" is checked first: ngrok words it as an authentication
@@ -18,6 +18,43 @@ export function ngrokErrorKind(msg) {
   if (/authtoken|ERR_NGROK_4018|ERR_NGROK_105|ERR_NGROK_107/i.test(m)) return 'auth';
   if (/ERR_NGROK_108|simultaneous|limited to 1/i.test(m)) return 'busy';
   return 'other';
+}
+
+// ---------- outgoing secret scan ----------
+// A second line of defense under the skill's redaction rules: `send` refuses a message that looks like it
+// carries credentials, unless the user explicitly allows it. The patterns favor real credential shapes over
+// recall, so ordinary test data (chip numbers, PINs, ids) passes.
+const REDACTED = /^(\[?redacted\]?|\*{3,}|x{3,}|<[^>]*>|\.\.\.|…)$/i;
+const SECRET_PATTERNS = [
+  ['private key', /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED |PGP )?PRIVATE KEY(?: BLOCK)?-----/g],
+  ['JWT', /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{2,}/g],
+  ['bearer token', /\bBearer\s+([A-Za-z0-9._~+/=-]{12,})/gi],
+  ['AWS access key', /\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g],
+  ['Google API key', /\bAIza[0-9A-Za-z_-]{35}\b/g],
+  ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{40,})\b/g],
+  ['Slack token', /\bxox[abprs]-[A-Za-z0-9-]{10,}/g],
+  ['Stripe live key', /\b[rs]k_live_[0-9A-Za-z]{16,}/g],
+  ['credentials in URL', /\b[a-z][a-z0-9+.-]{1,20}:\/\/[^\s:/@"']{1,64}:([^\s@"'/]{3,})@[^\s"']+/gi],
+  ['cookie', /\b(?:Set-)?Cookie\s*:\s*[^\s=;"]+=([^\s;"]{8,})/gi],
+  ['secret-looking field', /["']?\b([A-Za-z0-9_]*(?:secret|token|password|passwd|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?secret)[A-Za-z0-9_]*)["']?\s*[:=]\s*["']?([^\s"',}]{6,})/gi],
+];
+const mask = (s) => (s.length <= 8 ? '*'.repeat(s.length) : `${s.slice(0, 4)}…(${s.length} chars)`);
+
+/** Returns [{ kind, sample }] for credential-looking content in `text` (empty if none). */
+export function scanSecrets(text) {
+  const found = [];
+  const s = String(text ?? '');
+  for (const [kind, re] of SECRET_PATTERNS) {
+    re.lastIndex = 0;
+    for (const m of s.matchAll(re)) {
+      const value = m[m.length - 1] ?? m[0];
+      if (REDACTED.test(String(value).trim())) continue;
+      if (kind === 'secret-looking field' && /^(true|false|null|required|optional|string|number|boolean|\[?redacted\]?)$/i.test(value)) continue;
+      found.push({ kind, sample: mask(String(m[0]).slice(0, 80)) });
+      if (found.length >= 10) return found;
+    }
+  }
+  return found;
 }
 
 /** -1 / 0 / 1 for dotted numeric versions; unknown (null) sorts lowest. */

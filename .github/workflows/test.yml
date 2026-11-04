@@ -1,0 +1,34 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} · node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [18, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Syntax check
+        shell: bash
+        run: for f in scripts/*.mjs tests/*.mjs tests/eval-harness/*.mjs; do node --check "$f"; done
+      - name: Relay, CLI, dashboard and token tests
+        shell: bash
+        run: node --test tests/*.test.mjs
+      - name: Token budget measurement
+        shell: bash
+        run: node tests/token-measure.mjs

@@ -16,6 +16,10 @@ address. Notes:
   again with the same role. Peers that were already paired keep their keys: they run
   `bridge resume <new-url>`, which the host's output prints, and need no new code. Only `close` ends the
   pairings.
+- **A fixed address.** Every ngrok account has a domain of its own (dashboard.ngrok.com → Domains; free
+  accounts get one such as `something-random.ngrok-free.dev`). Pass it with `--domain <name>`, or set
+  `AGENT_BRIDGE_NGROK_DOMAIN`, and save it in the project profile. The address then survives restarts, and
+  peers can reconnect with the same line. On many free accounts ngrok already uses that domain by default.
 - ngrok sets a **minimum agent version per account**, so a fresh install from a package manager can be too old
   ("Your ngrok-agent version ... is too old"). The CLI recognizes this and tells you to run `ngrok update`.
 - The free plan allows one ngrok agent at a time. If another ngrok is already running, the error mentions

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // agent-bridge CLI: connect two Claude sessions on different machines and pass messages between them.
 //
-//   host     --role <role> [--ngrok | --lan] [--port 7878] [--name "..."]   start the relay on this machine
+//   host     --role <role> [--ngrok [--domain my-name.ngrok-free.app] | --lan] [--port 7878] [--name "..."]   start the relay
 //   connect  <url | ip[:port]> --code <CODE> --role <role> [--name "..."]   join a relay from another machine
 //   resume   <url | ip[:port]>         keep your pairing, point it at the host's new address (e.g. new ngrok URL)
 //   send     --type <type> [--to <role|peer_id|*>] [--thread <id> | --new-thread] [--reply-to <msg_id>]
@@ -17,7 +17,8 @@
 //   dashboard [--port 7879] [--open] [--stop]   local read-only web view of the conversation
 //
 // Global: --dir <state dir> (default ./.agent-bridge or $AGENT_BRIDGE_DIR), --json for machine-readable output.
-// Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running.
+// Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running,
+//             5 send refused because the message looks like it contains secrets (override: --allow-secrets).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,7 +26,7 @@ import crypto from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  PROTOCOL, SKILL_VERSION, compareVersions, ngrokErrorKind, DEFAULT_PORT, MAX_ATTACHMENT_BYTES, LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, pairProof,
+  PROTOCOL, SKILL_VERSION, compareVersions, ngrokErrorKind, scanSecrets, DEFAULT_PORT, MAX_ATTACHMENT_BYTES, LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, pairProof,
   safeEqual, genKeyPair, deriveSessionKey, seal, open, requestAad, responseAad, resolveStateDir, ensureDir,
   readJson, writeJsonPrivate, appendJsonl, pidAlive, safeFileName,
 } from './lib.mjs';
@@ -252,12 +253,28 @@ function ngrokFailure(raw) {
   return `ngrok failed: ${first}\nSee ${F.tunnelLog}. Or use --lan on the same network.`;
 }
 
+// A fixed ngrok domain (every ngrok account has one; see dashboard.ngrok.com/domains) keeps the address the same
+// across restarts, so peers never need `resume`. Passed as --domain or AGENT_BRIDGE_NGROK_DOMAIN.
+function ngrokDomain() {
+  const raw = opts.domain && opts.domain !== true ? String(opts.domain) : process.env.AGENT_BRIDGE_NGROK_DOMAIN || '';
+  const d = raw.trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  if (d && !/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(d)) die(`--domain must be a host name like my-name.ngrok-free.app (got "${raw}")`);
+  return d || null;
+}
+
 async function startNgrok(port) {
+  const domain = ngrokDomain();
   const t = readJson(F.tunnel);
-  if (t?.pid && pidAlive(t.pid) && t.url) return t;
+  if (t?.pid && pidAlive(t.pid) && t.url) {
+    if (!domain || t.url === `https://${domain}`) return t;
+    try { process.kill(t.pid); } catch {} // asked for a different fixed domain: restart the tunnel
+    await sleep(500);
+  }
   fs.writeFileSync(F.tunnelLog, '');
   const fd = fs.openSync(F.tunnelLog, 'a');
-  const child = spawn(ngrokBin(), ['http', `http://127.0.0.1:${port}`, '--log', 'stdout', '--log-format', 'json'], {
+  const ngArgs = ['http', `http://127.0.0.1:${port}`, '--log', 'stdout', '--log-format', 'json'];
+  if (domain) ngArgs.push('--url', `https://${domain}`);
+  const child = spawn(ngrokBin(), ngArgs, {
     detached: true, stdio: ['ignore', fd, fd], windowsHide: true,
   });
   child.unref();
@@ -270,7 +287,7 @@ async function startNgrok(port) {
       let j;
       try { j = JSON.parse(line); } catch { continue; }
       if (typeof j.url === 'string' && j.url.startsWith('https://')) {
-        const info = { pid: child.pid, url: j.url, port, started_at: new Date().toISOString() };
+        const info = { pid: child.pid, url: j.url, port, fixed_domain: !!domain, started_at: new Date().toISOString() };
         writeJsonPrivate(F.tunnel, info);
         return info;
       }
@@ -348,7 +365,7 @@ async function cmdHost() {
   info.already_paired = paired.map((p) => ({ role: p.role, name: p.name }));
   out([
     `agent-bridge relay ${running ? 'already running' : 'started'} — this device is "${sess.role}"`,
-    tunnel ? `  public url : ${tunnel.url}  (ngrok, HTTPS)` : null,
+    tunnel ? `  public url : ${tunnel.url}  (ngrok, HTTPS${tunnel.fixed_domain ? ', fixed domain: same address after restarts' : ''})` : null,
     lan.length ? `  lan        : ${lan.join(', ')}` : null,
     !tunnel && !lan.length ? `  local only : 127.0.0.1:${srv.port} (add --lan or --ngrok so other devices can reach it)` : null,
     `  pairing    : ${code}  (single use, expires ${new Date(expires).toLocaleTimeString()})`,
@@ -485,6 +502,21 @@ async function cmdSend() {
   });
   if (total > MAX_ATTACHMENT_BYTES) die(`attachments total ${total} bytes; limit is ${MAX_ATTACHMENT_BYTES}. Send fewer/smaller files (crop screenshots, trim logs).`);
   const msg = { to: to ?? '*', type, thread_id: thread, reply_to: replyTo, body: readBodyArg(), attachments };
+
+  // Refuse to ship credential-looking content unless the user explicitly allowed it.
+  if (!opts['allow-secrets']) {
+    const TEXT_EXT = /\.(txt|log|json|har|md|csv|xml|ya?ml|env|ini|properties|html?|js|ts|kt|swift|sql)$/i;
+    const where = [];
+    const bodyText = msg.body == null ? '' : typeof msg.body === 'string' ? msg.body : JSON.stringify(msg.body);
+    for (const f of scanSecrets(bodyText)) where.push(`body: ${f.kind} ${f.sample}`);
+    for (const a of attachments) {
+      if (!(TEXT_EXT.test(a.name) || /^text\/|json|xml|yaml/.test(a.mime))) continue;
+      for (const f of scanSecrets(fromB64u(a.data_b64).toString('utf8'))) where.push(`${a.name}: ${f.kind} ${f.sample}`);
+    }
+    if (where.length) {
+      die(`not sent: this looks like it contains secrets:\n  ${where.slice(0, 10).join('\n  ')}\nRedact them (references/security.md) and send again. If these are deliberately shared test values and your user agreed, add --allow-secrets.`, 5);
+    }
+  }
   const r = await rpc(sess, 'send', msg, 60_000);
   logLocal('out', { id: r.id, seq: r.seq, ts: new Date().toISOString(), from: { id: sess.peer_id, role: sess.role, name: sess.name }, ...msg, attachments: attachments.map((a) => ({ name: a.name, mime: a.mime, size: fromB64u(a.data_b64).length })) });
   // Peers start reading from the moment they join, so a message nobody received is effectively dropped.

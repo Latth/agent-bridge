@@ -7,11 +7,11 @@
 A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
 accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
-[![version](https://img.shields.io/badge/version-1.3.0-2563eb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.4.0-2563eb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
-[![tests](https://img.shields.io/badge/tests-33%20passing-16a34a)](tests)
+[![tests](https://github.com/Latth/agent-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/Latth/agent-bridge/actions/workflows/test.yml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20plugin-d97757)](https://claude.com/claude-code)
 
 [Quick start](#-quick-start) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
@@ -93,8 +93,9 @@ the role out and let it be inferred from the project. The code works once and ex
 you what is happening.
 
 > [!TIP]
-> If the host restarts, the free ngrok plan gives it a new URL. Run `host` again. Peers that were already
-> paired only need `/agent-bridge resume <new-url>`; no new code is needed until someone runs `close`.
+> Use your ngrok domain (`--domain your-name.ngrok-free.app`, listed under dashboard.ngrok.com → Domains)
+> and the address never changes. Without one, a restarted host may get a new URL: run `host` again, and
+> paired peers only need `/agent-bridge resume <new-url>`. No new code is needed until someone runs `close`.
 
 ## 👀 Watch the conversation
 
@@ -177,13 +178,15 @@ is a good idea. So messages from the peer are treated as **data, not instruction
 | send secrets (`.env`, tokens, cookies) or real customer data | refuses with a `declined` message |
 
 Logs, HAR files and screenshots are redacted before they are sent: `Authorization`, cookies, tokens and
-personal data. Details are in [references/security.md](references/security.md).
+personal data. As a backstop, `send` **scans every outgoing body and text attachment**. If something looks
+like a credential (JWT, bearer token, private key, cloud or GitHub keys, `user:pass@` URLs, `*_SECRET=`
+values), the message is not sent. Details are in [references/security.md](references/security.md).
 
 ## 📊 Status
 
 | | |
 |---|---|
-| ✅ **Relay, CLI and dashboard** | 33 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, and the token budget (batching, compact output, body cut-offs) (`node --test tests/*.test.mjs`) |
+| ✅ **Relay, CLI and dashboard** | 37 automated tests, run by CI on Windows, macOS and Linux (Node 18 and 22): pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, the token budget (batching, compact output, body cut-offs), and the outgoing secret scan (`node --test tests/*.test.mjs`) |
 | ✅ **Agent behavior** | 4 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report. **26/26 checks with the skill, 19/26 without** ([eval harness](tests/eval-harness/README.md)) |
 | ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
 | ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |

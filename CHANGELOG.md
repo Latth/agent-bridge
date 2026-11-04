@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0
+
+- **Outgoing secret scan.** `send` checks bodies and text attachments for credential shapes: private keys,
+  JWTs, bearer tokens, AWS/Google/GitHub/Slack/Stripe keys, `user:pass@` URLs, cookies, and
+  `*secret*`/`*token*`/`*password*`/`*api_key*` values. If it finds any, it refuses with exit code 5 and lists
+  masked samples. Redacted values and normal test data pass. `--allow-secrets` overrides it for one message,
+  and SKILL.md limits that to values the user explicitly agreed to share.
+- **Fixed ngrok address.** `host --domain <name>`, or `AGENT_BRIDGE_NGROK_DOMAIN`, uses the account's ngrok
+  domain, so the address survives restarts. Tested against a real ngrok account.
+- **CI.** GitHub Actions runs the syntax check, all tests and the token measurement on Windows, macOS and
+  Linux with Node 18 and 22. README badge.
+- 4 new tests (37 total).
+
 ## 1.3.0: token budget
 
 Measured with `node tests/token-measure.mjs`, where the peer sends a bug report, a progress update and an ack
