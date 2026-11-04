@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.5.0: dashboard as a control panel, reports
+
+- **Approvals.** `bridge approval request --title ... [--details ...] [--for ...]`, then `approval wait <id>`
+  (background) and `approval resolve <id> --approve|--decline` for answers given in chat. Pending approvals
+  are pinned at the top of the dashboard with Approve/Decline and an optional comment. Decisions are final,
+  and a peer can never approve.
+- **Notes to your agent.** A dashboard box sends a note to the local agent only. `wait` delivers it within
+  ~10 s while the dashboard is open, labeled `user_note · from YOUR USER (dashboard)`, as the user's
+  instruction. A peer message typed `user_note` stays peer data.
+- **Reports.** `bridge report [--thread]` writes a Markdown report (summary, scenarios and results, bugs with
+  open/fixed/verified status, test data, timeline) and prints only its path. The dashboard's "⬇ Report"
+  downloads the same report for the selected thread.
+- **Notifications.** A "🔔 Notify" toggle turns on desktop notifications for bug reports, approval requests,
+  questions, fix_ready and final reports, and the tab title counts unseen items.
+- Dashboard writes need the token in an `x-ab-token` header too (cross-site requests can't send it), and
+  request bodies are capped. Note cursors survive host restarts and new connections, so notes aren't
+  delivered twice.
+- New eval `backend-no-ping-pong`: the scripted peer answers with a friendly ack plus a final_report. Both
+  configurations stayed silent (4/4), so it is recorded as non-discriminating and kept as a regression
+  guard. The harness's scripted peer can now react to the agent's messages (`on_message`).
+- 8 new tests (45 total).
+
 ## 1.4.0
 
 - **Outgoing secret scan.** `send` checks bodies and text attachments for credential shapes: private keys,

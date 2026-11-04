@@ -15,7 +15,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { SKILL_VERSION, resolveStateDir, readJson, writeJsonPrivate, safeEqual, safeFileName } from './lib.mjs';
+import { SKILL_VERSION, resolveStateDir, readJson, writeJsonPrivate, safeEqual, safeFileName, appendJsonl } from './lib.mjs';
+import { buildReport } from './report.mjs';
 
 const args = {};
 for (let i = 2; i < process.argv.length; i++) {
@@ -36,6 +37,8 @@ const F = {
   state: path.join(DIR, 'server-state.json'),
   inbox: path.join(DIR, 'inbox'),
   info: path.join(DIR, 'dashboard.json'),
+  approvals: path.join(DIR, 'approvals.json'),
+  notes: path.join(DIR, 'notes.jsonl'),
 };
 const PAGE = fs.readFileSync(fileURLToPath(new URL('./dashboard.html', import.meta.url)), 'utf8');
 
@@ -114,6 +117,19 @@ function peers() {
 
 let all = collect();
 
+const approvals = () => Object.values(readJson(F.approvals, {}) || {}).sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
+const notes = () => { try { return fs.readFileSync(F.notes, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+
+function readBody(req, limit = 16_384) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => { size += c.length; if (size > limit) { reject(new Error('too large')); req.destroy(); } else chunks.push(c); });
+    req.on('end', () => { try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); } catch { reject(new Error('bad json')); } });
+    req.on('error', reject);
+  });
+}
+
 // ---------- http ----------
 const loopbackHost = new RegExp(`^(127\\.0\\.0\\.1|localhost|\\[::1\\]):${PORT}$`);
 const clients = new Set();
@@ -140,7 +156,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/state') {
     res.writeHead(200, { ...common, 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ version: SKILL_VERSION, dir: path.basename(path.dirname(DIR)), ...peers(), messages: all }));
+    return res.end(JSON.stringify({ version: SKILL_VERSION, dir: path.basename(path.dirname(DIR)), ...peers(), messages: all, approvals: approvals(), notes: notes() }));
   }
   if (url.pathname === '/api/events') {
     res.writeHead(200, { ...common, 'content-type': 'text/event-stream', connection: 'keep-alive' });
@@ -148,6 +164,43 @@ const server = http.createServer((req, res) => {
     clients.add(res);
     req.on('close', () => clients.delete(res));
     return;
+  }
+  if (url.pathname === '/api/report' && req.method === 'GET') {
+    const thread = url.searchParams.get('thread') || null;
+    const md = buildReport(all, { thread, version: SKILL_VERSION });
+    const name = `agent-bridge-report-${safeFileName(thread || 'all-threads')}.md`;
+    res.writeHead(200, { ...common, 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="${name}"` });
+    return res.end(md);
+  }
+  if (req.method === 'POST') {
+    // Writes need the token in a custom header as well: browsers won't add it to a cross-site request
+    // without a CORS preflight, which this server never approves, so other sites can't act for the user.
+    if (!safeEqual(String(req.headers['x-ab-token'] || ''), TOKEN)) return deny(res, 403, 'missing x-ab-token header');
+    const ap = url.pathname.match(/^\/api\/approvals\/([\w-]{1,32})$/);
+    if (ap) {
+      return readBody(req).then((b) => {
+        const list = readJson(F.approvals, {}) || {};
+        const a = list[ap[1]];
+        if (!a) return deny(res, 404, 'no such approval');
+        if (a.status !== 'pending') return deny(res, 409, `already ${a.status}`);
+        if (!['approve', 'decline'].includes(b.decision)) return deny(res, 400, 'decision must be approve or decline');
+        Object.assign(a, { status: b.decision === 'approve' ? 'approved' : 'declined', comment: b.comment ? String(b.comment).slice(0, 2000) : null, decided_at: new Date().toISOString(), decided_via: 'dashboard' });
+        writeJsonPrivate(F.approvals, list);
+        res.writeHead(200, { ...common, 'content-type': 'application/json' });
+        res.end(JSON.stringify(a));
+      }).catch((e) => deny(res, 400, e.message));
+    }
+    if (url.pathname === '/api/notes') {
+      return readBody(req).then((b) => {
+        const text = String(b.text || '').trim().slice(0, 4000);
+        if (!text) return deny(res, 400, 'empty note');
+        const note = { id: `note_${crypto.randomBytes(5).toString('hex')}`, ts: new Date().toISOString(), text };
+        appendJsonl(F.notes, note);
+        res.writeHead(200, { ...common, 'content-type': 'application/json' });
+        res.end(JSON.stringify(note));
+      }).catch((e) => deny(res, 400, e.message));
+    }
+    return deny(res, 404, 'not found');
   }
   const fm = url.pathname.match(/^\/files\/([\w]+)\/([^/]+)$/);
   if (fm) {
@@ -170,16 +223,24 @@ const server = http.createServer((req, res) => {
 
 // Push new messages and peer changes to open pages.
 let lastPeers = '';
+let lastApprovals = '';
+let lastNotes = -1;
 setInterval(() => {
   const fresh = collect();
   if (fresh.length) all = all.concat(fresh);
   const p = JSON.stringify(peers());
+  const ap = JSON.stringify(approvals());
+  const ns = notes();
   for (const c of clients) {
     if (fresh.length) c.write(`event: messages\ndata: ${JSON.stringify(fresh)}\n\n`);
     if (p !== lastPeers) c.write(`event: peers\ndata: ${p}\n\n`);
+    if (ap !== lastApprovals) c.write(`event: approvals\ndata: ${ap}\n\n`);
+    if (ns.length !== lastNotes) c.write(`event: notes\ndata: ${JSON.stringify(ns)}\n\n`);
     c.write(': ping\n\n');
   }
   lastPeers = p;
+  lastApprovals = ap;
+  lastNotes = ns.length;
 }, 1000).unref();
 
 function shutdown() {

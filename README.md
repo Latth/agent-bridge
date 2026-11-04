@@ -7,7 +7,7 @@
 A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
 accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
-[![version](https://img.shields.io/badge/version-1.4.0-2563eb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.5.0-2563eb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
@@ -113,6 +113,19 @@ of what the agents are saying to each other:
 - **Private**: it runs on `127.0.0.1` only, behind a random token, and never goes through ngrok. Peer content
   can't run script in your browser.
 
+It is also a small **control panel**:
+
+<p align="center"><img src="docs/dashboard-approval.jpg" alt="An approval request pinned above the timeline with Approve and Decline buttons, and a 'note to your agent' box in the sidebar" width="820"></p>
+
+- **Approve or decline** what your agent asks for (a staging deploy, a migration...) with one click and an
+  optional comment. The agent is waiting on it, and you can still answer in chat instead.
+- **Write a note to your own agent** ("focus on S2 today"). It reaches the agent on this computer within
+  seconds, labeled as coming from you. Notes never go to the other side.
+- **⬇ Report**: download a Markdown report of the selected thread, with scenarios and results, bugs and
+  their status, the test data created, and a timeline. It's ready to paste into a PR or ticket. Agents can
+  write the same report with `bridge report`.
+- **🔔 Notify**: desktop notifications for bug reports, approval requests, questions and final reports.
+
 It works on both sides. The host sees everything that passes through the relay; a peer sees what it sent and
 received.
 
@@ -153,7 +166,9 @@ The agent runs these for you. You only need them for debugging.
 | `wait` | Wait for messages (a burst comes as one batch, long bodies are cut) or a 6 h timeout |
 | `status` · `inbox` · `log` | Peers and versions, unread messages, history |
 | `code` · `kick <peer>` · `close` | (host) New pairing code, remove a peer, end the bridge and revoke all keys |
-| `dashboard [--open] [--stop]` | Local, live, read-only web view of the conversation |
+| `dashboard [--open] [--stop]` | Local live view of the conversation, plus approvals, notes to your agent, report download, notifications |
+| `report [--thread <id>]` | Markdown report of the cycle: scenarios, bugs, data, timeline |
+| `approval request` · `wait` · `resolve` · `list` | Ask your user for a go-ahead, answerable in chat or the dashboard |
 | `version` | This machine's agent-bridge version |
 
 They are all `node scripts/bridge.mjs <command>`. State lives in `.agent-bridge/` in the project, which
@@ -186,8 +201,8 @@ values), the message is not sent. Details are in [references/security.md](refere
 
 | | |
 |---|---|
-| ✅ **Relay, CLI and dashboard** | 37 automated tests, run by CI on Windows, macOS and Linux (Node 18 and 22): pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, the token budget (batching, compact output, body cut-offs), and the outgoing secret scan (`node --test tests/*.test.mjs`) |
-| ✅ **Agent behavior** | 4 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report. **26/26 checks with the skill, 19/26 without** ([eval harness](tests/eval-harness/README.md)) |
+| ✅ **Relay, CLI and dashboard** | 45 automated tests, run by CI on Windows, macOS and Linux (Node 18 and 22): pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, the token budget (batching, compact output, body cut-offs), the outgoing secret scan, reports, approvals and dashboard notes (`node --test tests/*.test.mjs`) |
+| ✅ **Agent behavior** | 5 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report, and no ping-pong after a friendly ack. **30/30 checks with the skill, 23/30 without.** The safety and no-ping-pong cases pass either way: today's model already behaves there. The skill's edge is the shared protocol and complete evidence ([eval harness](tests/eval-harness/README.md)) |
 | ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
 | ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |
 

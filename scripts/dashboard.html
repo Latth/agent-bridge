@@ -43,6 +43,7 @@
   .thread.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 600; }
   .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
   main { overflow: auto; padding: 18px 22px 40px; }
+  #timeline { min-height: 50%; }
   .empty { color: var(--muted); text-align: center; margin-top: 80px; }
   .msg { display: flex; gap: 10px; margin: 0 0 14px; max-width: 900px; }
   .msg.mine { margin-left: auto; flex-direction: row-reverse; }
@@ -70,6 +71,25 @@
   .system { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 0 16px; }
   .system span { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; }
   .note { font-size: 12px; color: var(--muted); padding: 8px; }
+  button.btn { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; cursor: pointer; white-space: nowrap; }
+  button.btn:hover { border-color: var(--muted); }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.btn.ok { background: var(--ok); border-color: var(--ok); color: #fff; }
+  button.btn.bad { background: transparent; border-color: var(--bad); color: var(--bad); }
+  button.btn[aria-pressed=true] { border-color: var(--accent); color: var(--accent); }
+  .composer { padding: 6px; display: grid; gap: 6px; }
+  .composer textarea { width: 100%; min-height: 70px; resize: vertical; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px; font: inherit; }
+  .composer .hint { font-size: 11px; color: var(--muted); }
+  #approvals { position: sticky; top: -18px; z-index: 1; margin: -18px -22px 16px; padding: 12px 22px; background: color-mix(in srgb, var(--warn) 10%, var(--bg)); border-bottom: 1px solid color-mix(in srgb, var(--warn) 35%, var(--line)); }
+  #approvals:empty { display: none; }
+  #approvals h3 { margin: 0 0 8px; font-size: 13px; }
+  .appr { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; }
+  .appr .t { font-weight: 650; }
+  .appr .d { white-space: pre-wrap; color: var(--text); font-size: 13px; margin: 4px 0 8px; }
+  .appr .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .appr input { flex: 1; min-width: 140px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
+  .msg.user .card { border-style: dashed; background: color-mix(in srgb, var(--ok) 7%, var(--panel)); }
+  .decided { font-size: 12px; color: var(--muted); margin: 4px 0 12px; text-align: center; }
   @media (max-width: 760px) {
     .layout { grid-template-columns: 1fr; height: auto; }
     aside { border-right: 0; border-bottom: 1px solid var(--line); }
@@ -85,6 +105,8 @@
   <span class="spacer"></span>
   <input id="q" type="search" placeholder="Search messages…" aria-label="Search messages">
   <select id="type" aria-label="Filter by message type"><option value="">All types</option></select>
+  <button id="notify" class="btn" aria-pressed="false" title="Desktop notifications for bug reports, approvals and final reports">🔔 Notify</button>
+  <button id="report" class="btn" title="Download a Markdown report of the selected thread">⬇ Report</button>
 </header>
 <div class="layout">
   <aside>
@@ -92,9 +114,15 @@
     <div id="agents"></div>
     <h2>Threads</h2>
     <div id="threads"></div>
-    <p class="note">Read-only view of this machine's bridge log. Only reachable from this computer.</p>
+    <h2>Note to your agent</h2>
+    <div class="composer">
+      <textarea id="noteText" maxlength="4000" placeholder="e.g. Focus on S2 first, skip S4 today." aria-label="Note to your agent"></textarea>
+      <button id="noteSend" class="btn primary">Send to my agent</button>
+      <div class="hint">Goes only to the agent on this computer (not to the other side). It arrives within ~10 s while the agent is listening.</div>
+    </div>
+    <p class="note">Only reachable from this computer.</p>
   </aside>
-  <main id="timeline" aria-live="polite"></main>
+  <main id="timeline-wrap"><div id="approvals" aria-live="assertive"></div><div id="timeline" aria-live="polite"></div></main>
 </div>
 <script nonce="__NONCE__">
 (() => {
@@ -107,12 +135,18 @@
     hello: '#64748b', test_scenarios: '#2563eb', ui_testable_scenarios: '#0891b2', data_request: '#d97706', data_response: '#16a34a',
     test_progress: '#0d9488', bug_report: '#dc2626', fix_ready: '#7c3aed', retest_result: '#0d9488', question: '#ca8a04', answer: '#65a30d',
     ack: '#64748b', declined: '#b91c1c', blocked: '#ea580c', final_report: '#1d4ed8', peer_joined: '#6b7280', peer_left: '#6b7280',
+    user_note: '#16a34a', approval_request: '#d97706', approved: '#16a34a', declined_by_you: '#b91c1c',
   };
+  ROLE_COLORS.you = '#0f766e';
   const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 55% 45%)`; };
   const roleColor = (r) => ROLE_COLORS[r] || hue(r || '?');
   const typeColor = (t) => TYPE_COLORS[t] || hue(t || '?');
 
-  let state = { me: null, peers: [], messages: [] };
+  let state = { me: null, peers: [], messages: [], approvals: [], notes: [] };
+  let notifyOn = false;
+  try { notifyOn = localStorage.getItem('ab-notify') === '1' && 'Notification' in window && Notification.permission === 'granted'; } catch {}
+  const NOTIFY_TYPES = new Set(['bug_report', 'final_report', 'declined', 'blocked', 'question', 'fix_ready']);
+  let unseen = 0;
   let filter = { thread: '', type: '', text: '' };
   let connected = false;
 
@@ -123,6 +157,55 @@
   const isSystem = (m) => m.from && m.from.id === 'bridge';
   const byId = () => new Map(state.messages.map((m) => [m.id, m]));
   const nameOf = (id) => { const p = state.peers.find((x) => x.id === id); return p ? `${p.role}` : id; };
+  const isLocal = (m) => m.from && (m.from.id === 'local-user' || m.from.id === 'local-agent');
+
+  async function post(path, body) {
+    const res = await fetch(api(path), { method: 'POST', headers: { 'content-type': 'application/json', 'x-ab-token': token }, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  // Notes and approvals live on this machine only; they are shown in the timeline next to the peer messages.
+  function localItems() {
+    const me = state.me ? state.me.role : 'agent';
+    const items = state.notes.map((n) => ({ id: n.id, ts: n.ts, type: 'user_note', from: { id: 'local-user', role: 'you', name: 'You' }, to: `your ${me} agent`, body: n.text }));
+    for (const a of state.approvals) {
+      items.push({ id: `apr-${a.id}`, ts: a.requested_at, type: 'approval_request', from: { id: 'local-agent', role: me, name: `Your ${me} agent` }, to: 'you', body: { id: a.id, title: a.title, details: a.details || undefined, for: a.requested_for || undefined } });
+      if (a.status !== 'pending') items.push({ id: `apd-${a.id}`, ts: a.decided_at, type: a.status === 'approved' ? 'approved' : 'declined_by_you', from: { id: 'local-user', role: 'you', name: 'You' }, to: `your ${me} agent`, body: { id: a.id, title: a.title, comment: a.comment || undefined, via: a.decided_via } });
+    }
+    return items;
+  }
+
+  function renderApprovals() {
+    const box = q('#approvals'); box.replaceChildren();
+    const pending = state.approvals.filter((a) => a.status === 'pending');
+    if (!pending.length) return;
+    box.append(el('h3', null, `⏳ Your agent is waiting for your approval (${pending.length})`));
+    for (const a of pending) {
+      const card = el('div', 'appr');
+      card.append(el('div', 't', `${a.id} · ${a.title}`));
+      if (a.details) card.append(el('div', 'd', a.details));
+      if (a.requested_for) card.append(el('div', 'd', `Requested because: ${a.requested_for}`));
+      const row = el('div', 'row');
+      const comment = document.createElement('input'); comment.placeholder = 'Optional comment for your agent'; comment.maxLength = 2000;
+      const yes = el('button', 'btn ok', 'Approve'); const no = el('button', 'btn bad', 'Decline');
+      const decide = async (decision) => {
+        yes.disabled = no.disabled = true;
+        try { await post(`/api/approvals/${encodeURIComponent(a.id)}`, { decision, comment: comment.value.trim() || undefined }); }
+        catch (e) { yes.disabled = no.disabled = false; alert(`Could not save: ${e.message}`); }
+      };
+      yes.addEventListener('click', () => decide('approve'));
+      no.addEventListener('click', () => decide('decline'));
+      row.append(comment, yes, no); card.append(row); box.append(card);
+    }
+  }
+
+  function notify(title, body) {
+    if (document.hidden) { unseen++; document.title = `(${unseen}) Agent Bridge Monitor`; }
+    if (!notifyOn || !('Notification' in window) || Notification.permission !== 'granted') return;
+    try { new Notification(title, { body: String(body || '').slice(0, 180), tag: 'agent-bridge' }); } catch {}
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { unseen = 0; document.title = `Agent Bridge Monitor · ${state.me ? state.me.role : 'bridge'}`; } });
 
   function setLive(on, text) {
     connected = on;
@@ -220,7 +303,7 @@
       const text = m.type === 'peer_joined' ? `${p ? `${p.role} "${p.name}"` : 'an agent'} joined` : m.type === 'peer_left' ? `${p ? `${p.role} "${p.name}"` : 'an agent'} left` : m.type;
       const s = el('div', 'system'); s.append(el('span', null, `${text} · ${fmtTime(m.ts)}`)); s.id = 'm-' + m.id; return s;
     }
-    const row = el('div', 'msg' + (isMine(m) ? ' mine' : ''));
+    const row = el('div', 'msg' + (isMine(m) || isLocal(m) && m.from.id === 'local-agent' ? ' mine' : '') + (m.from && m.from.id === 'local-user' ? ' user mine' : ''));
     row.id = 'm-' + m.id;
     const card = el('div', 'card');
     const head = el('div', 'head');
@@ -259,10 +342,12 @@
 
   function render(newIds = new Set()) {
     const main = q('#timeline');
-    const nearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 120;
-    renderAgents(); renderThreads();
+    const scroller = q('#timeline-wrap');
+    const nearBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+    renderAgents(); renderThreads(); renderApprovals();
     const map = byId();
-    const list = state.messages.filter(visible);
+    const local = filter.thread ? [] : localItems();
+    const list = state.messages.concat(local).filter(visible).sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
     main.replaceChildren();
     if (!list.length) {
       main.append(el('div', 'empty', state.messages.length ? 'No messages match the filter.' : 'No messages yet. They appear here live as the agents talk.'));
@@ -273,7 +358,7 @@
       if (newIds.has(m.id)) v.classList.add('flash');
       main.append(v);
     }
-    if (nearBottom || newIds.size === 0) main.scrollTop = main.scrollHeight;
+    if (nearBottom || newIds.size === 0) scroller.scrollTop = scroller.scrollHeight;
   }
 
   const sortMsgs = () => state.messages.sort((a, b) => (a.ts || '').localeCompare(b.ts || '') || (a.seq || 0) - (b.seq || 0));
@@ -282,7 +367,7 @@
     const res = await fetch(api('/api/state'));
     if (!res.ok) { setLive(false, `error ${res.status}`); q('#timeline').replaceChildren(el('div', 'empty', res.status === 401 ? 'Wrong or missing token. Open the exact URL that `bridge dashboard` printed.' : `Could not load (${res.status}).`)); return; }
     const data = await res.json();
-    state = { me: data.me, peers: data.peers || [], messages: data.messages || [] };
+    state = { me: data.me, peers: data.peers || [], messages: data.messages || [], approvals: data.approvals || [], notes: data.notes || [] };
     sortMsgs(); renderTypes(); render();
     document.title = `Agent Bridge Monitor · ${state.me ? state.me.role : 'bridge'}`;
     listen();
@@ -299,9 +384,41 @@
       if (!add.length) return;
       state.messages.push(...add); sortMsgs(); renderTypes();
       render(new Set(add.map((m) => m.id)));
+      for (const m of add) if (NOTIFY_TYPES.has(m.type) && !isMine(m)) notify(`${m.from ? m.from.role : 'peer'}: ${m.type}`, typeof m.body === 'string' ? m.body : (m.body && (m.body.title || m.body.summary || m.body.text)) || '');
     });
     es.addEventListener('peers', (e) => { const p = JSON.parse(e.data); state.me = p.me || state.me; state.peers = p.peers || []; renderAgents(); });
+    es.addEventListener('approvals', (e) => {
+      const next = JSON.parse(e.data);
+      const before = new Set(state.approvals.filter((a) => a.status === 'pending').map((a) => a.id));
+      state.approvals = next; render();
+      for (const a of next) if (a.status === 'pending' && !before.has(a.id)) notify('Approval needed', `${a.id}: ${a.title}`);
+    });
+    es.addEventListener('notes', (e) => { state.notes = JSON.parse(e.data); render(); });
   }
+
+  q('#noteSend').addEventListener('click', async () => {
+    const t = q('#noteText'); const text = t.value.trim(); if (!text) return;
+    q('#noteSend').disabled = true;
+    try { await post('/api/notes', { text }); t.value = ''; } catch (e) { alert(`Could not send: ${e.message}`); }
+    q('#noteSend').disabled = false;
+  });
+  q('#report').addEventListener('click', () => {
+    const th = filter.thread && filter.thread !== '__none__' ? `?thread=${encodeURIComponent(filter.thread)}` : '';
+    location.href = api(`/api/report${th}`);
+  });
+  const notifyBtn = q('#notify');
+  const setNotifyBtn = () => { notifyBtn.setAttribute('aria-pressed', String(notifyOn)); notifyBtn.textContent = notifyOn ? '🔔 On' : '🔕 Notify'; };
+  setNotifyBtn();
+  notifyBtn.addEventListener('click', async () => {
+    if (!('Notification' in window)) { alert('This browser does not support notifications.'); return; }
+    if (!notifyOn && Notification.permission !== 'granted') {
+      const p = await Notification.requestPermission();
+      if (p !== 'granted') { alert('Notifications are blocked for this page in the browser settings.'); return; }
+    }
+    notifyOn = !notifyOn;
+    try { localStorage.setItem('ab-notify', notifyOn ? '1' : '0'); } catch {}
+    setNotifyBtn();
+  });
 
   q('#q').addEventListener('input', (e) => { filter.text = e.target.value.trim().toLowerCase(); render(); });
   q('#type').addEventListener('change', (e) => { filter.type = e.target.value; render(); });

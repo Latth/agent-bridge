@@ -80,6 +80,9 @@ function writeServerFile(extra = {}) {
 
 // The host's own CLI talks to this server like any other peer, through this local session file.
 const prevSession = readJson(SESSION_FILE, {}) ?? {};
+function countLines(file) {
+  try { return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).length; } catch { return 0; }
+}
 writeJsonPrivate(SESSION_FILE, {
   protocol: PROTOCOL,
   server: `http://127.0.0.1:${PORT}`,
@@ -91,6 +94,8 @@ writeJsonPrivate(SESSION_FILE, {
   clock_offset_ms: 0,
   // Keep the host's read position across server restarts; a fresh host starts at the current end.
   cursor: prevSession.peer_id === hostPeer.id && Number.isFinite(prevSession.cursor) ? prevSession.cursor : state.seq,
+  // Dashboard notes already delivered stay delivered; a new bridge starts after the existing ones.
+  note_cursor: prevSession.peer_id === hostPeer.id && Number.isFinite(prevSession.note_cursor) ? prevSession.note_cursor : countLines(path.join(DIR, 'notes.jsonl')),
 });
 
 const messages = []; // in-memory queue (most recent MAX_KEEP)

@@ -40,7 +40,7 @@ attachments. The relay adds `id`, `seq`, `ts` and `from`.
 ```json
 {
   "role": "mobile",
-  "skill_version": "1.4.0",
+  "skill_version": "1.5.0",
   "project": { "name": "acme-mobile", "platform": "android", "branch": "feature/login-v2" },
   "environment": "staging",
   "capabilities": {

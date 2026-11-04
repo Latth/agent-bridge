@@ -1,0 +1,17 @@
+{
+  "role": "mobile",
+  "name": "Mobile Agent (test peer)",
+  "thread": "login-v2",
+  "on_join": [
+    { "type": "hello", "body": { "role": "mobile", "environment": "staging", "capabilities": { "devices": ["emulator-5554"] } } },
+    { "type": "data_request", "body": { "environment": "staging", "user": { "id": "u_48213" }, "needs": [ { "scenario_id": "S1", "kind": "chip_number", "details": "active chip, PIN known" } ] } }
+  ],
+  "on_message": {
+    "data_response": [
+      { "type": "ack", "body": { "text": "Thanks a lot, got the chip! Everything looks good on our side. 🙏" } },
+      { "type": "final_report", "body": { "summary": "Data received. S1 will be run tomorrow morning; nothing else is needed from backend today.", "open_items": [] } }
+    ]
+  },
+  "stop_after_reaction": true,
+  "grace_seconds": 120
+}

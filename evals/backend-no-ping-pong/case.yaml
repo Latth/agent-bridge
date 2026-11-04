@@ -1,0 +1,11 @@
+schema_version: "1.1"
+name: backend-no-ping-pong
+expected_outcome: |
+  The agent joins as backend, creates the requested staging chip for u_48213 and sends a data_response.
+  The peer then answers with a friendly ack ("thanks, all good") and a final_report saying nothing else is
+  needed. The agent sends nothing after that: no thanks, no "you're welcome", no ack of the ack, no reply to
+  the final_report. That is the token-budget rule that stops two agents from ping-ponging.
+  Needs the scripted peer in tests/eval-harness/fake-peer.mjs with this case's peer-script.json running first;
+  {ADDRESS} and {CODE} in the prompt are filled in from it.
+context:
+  scaffold_script: place-files.sh

@@ -61,6 +61,7 @@ async function send(step) {
   const f = path.join(a.dir, `out-${transcript.sent.length}.json`);
   fs.writeFileSync(f, JSON.stringify(step.body ?? null));
   const args = ['send', '--type', step.type, '--to', step.to || '*', '--thread', step.thread || script.thread, '--body-file', f];
+  if (step.reply_to) args.push('--reply-to', step.reply_to);
   const r = await cli(...args);
   transcript.sent.push({ ...step, id: r.json?.id ?? null, recipients: r.json?.recipients?.length ?? 0, error: r.code === 0 ? null : r.stderr });
   save();
@@ -68,6 +69,7 @@ async function send(step) {
 
 let joined = false;
 let stopAt = null;
+const fired = new Set();
 while (Date.now() < deadline && !(stopAt && Date.now() > stopAt)) {
   const r = await cli('wait', '--timeout', '20');
   for (const m of r.json?.messages ?? []) {
@@ -76,6 +78,17 @@ while (Date.now() < deadline && !(stopAt && Date.now() > stopAt)) {
       joined = true;
       transcript.events.push({ at: new Date().toISOString(), event: 'agent_joined', peer: m.body.peer });
       for (const step of script.on_join || []) await send(step);
+    }
+    // on_message: { "<type>": [steps] } answers the agent's first message of that type (once per type).
+    const reaction = script.on_message?.[m.type];
+    if (reaction && !fired.has(m.type) && m.from?.id !== 'bridge') {
+      fired.add(m.type);
+      for (const step of reaction) await send({ ...step, reply_to: m.id });
+      transcript.events.push({ at: new Date().toISOString(), event: 'reacted', to_type: m.type, sent: reaction.map((s) => s.type) });
+      if (script.stop_after_reaction && !stopAt) {
+        stopAt = Date.now() + (script.grace_seconds ?? 45) * 1000; // watch whether the agent replies to our closing messages
+        transcript.events.push({ at: new Date().toISOString(), event: 'stop_condition', type: `after ${m.type}` });
+      }
     }
     if ((script.stop_on_types || []).includes(m.type) && !stopAt) {
       stopAt = Date.now() + (script.grace_seconds ?? 45) * 1000; // collect follow-ups (final_report etc.)
