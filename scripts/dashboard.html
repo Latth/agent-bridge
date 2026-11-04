@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent Bridge Monitor</title>
+<style nonce="__NONCE__">
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --panel-2: #f0f2f5; --line: #e3e6eb; --text: #1b1f24; --muted: #667085;
+    --accent: #d97757; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; --code-bg: #f6f8fa;
+    --shadow: 0 1px 2px rgba(16,24,40,.06), 0 1px 3px rgba(16,24,40,.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0f1115; --panel: #171a21; --panel-2: #1e222b; --line: #2a2f3a; --text: #e6e8ec; --muted: #98a2b3;
+      --code-bg: #12151b; --shadow: 0 1px 2px rgba(0,0,0,.4);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 2; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; }
+  .logo { width: 22px; height: 22px; border-radius: 6px; background: linear-gradient(135deg, var(--accent), #8b5cf6); display: inline-block; }
+  .live { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+  .dot.off { background: var(--bad); }
+  .spacer { flex: 1; }
+  input[type=search], select { background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font: inherit; min-width: 0; }
+  input[type=search] { width: 220px; }
+  .layout { display: grid; grid-template-columns: 260px 1fr; height: calc(100% - 53px); }
+  aside { border-right: 1px solid var(--line); background: var(--panel); overflow: auto; padding: 14px 12px; }
+  aside h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 14px 6px 8px; font-weight: 600; }
+  aside h2:first-child { margin-top: 0; }
+  .agent { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 10px; }
+  .agent .meta { min-width: 0; }
+  .agent .name { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .agent .sub { color: var(--muted); font-size: 12px; }
+  .avatar { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 12px; flex: none; text-transform: uppercase; }
+  .thread { display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font: inherit; cursor: pointer; }
+  .thread:hover { background: var(--panel-2); }
+  .thread.active { background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--text); font-weight: 600; }
+  .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  main { overflow: auto; padding: 18px 22px 40px; }
+  .empty { color: var(--muted); text-align: center; margin-top: 80px; }
+  .msg { display: flex; gap: 10px; margin: 0 0 14px; max-width: 900px; }
+  .msg.mine { margin-left: auto; flex-direction: row-reverse; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; box-shadow: var(--shadow); min-width: 0; flex: 1; }
+  .msg.mine .card { background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+  .msg.flash .card { animation: flash 1.6s ease-out; }
+  @keyframes flash { from { box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent); } }
+  .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; margin-bottom: 6px; }
+  .who { font-weight: 650; }
+  .arrow, .time { color: var(--muted); font-size: 12px; }
+  .badge { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid transparent; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .tag { font-size: 11px; color: var(--muted); border: 1px solid var(--line); border-radius: 999px; padding: 0 7px; }
+  .reply { font-size: 12px; color: var(--muted); margin: -2px 0 6px; cursor: pointer; }
+  .reply:hover { color: var(--text); text-decoration: underline; }
+  .text { white-space: pre-wrap; word-break: break-word; }
+  details.json summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  pre { margin: 6px 0 0; padding: 10px; background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px; overflow: auto; max-height: 420px; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { white-space: pre-wrap; word-break: break-word; }
+  .atts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .att { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border: 1px solid var(--line); border-radius: 8px; padding: 4px 8px; color: var(--text); text-decoration: none; background: var(--panel-2); }
+  .att img { max-height: 120px; max-width: 220px; border-radius: 6px; display: block; }
+  .att.thumb { padding: 4px; flex-direction: column; align-items: flex-start; }
+  .system { text-align: center; color: var(--muted); font-size: 12px; margin: 10px 0 16px; }
+  .system span { background: var(--panel-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 12px; }
+  .note { font-size: 12px; color: var(--muted); padding: 8px; }
+  @media (max-width: 760px) {
+    .layout { grid-template-columns: 1fr; height: auto; }
+    aside { border-right: 0; border-bottom: 1px solid var(--line); }
+    main { padding: 14px 12px 30px; }
+    input[type=search] { width: 100%; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo" aria-hidden="true"></span>Agent Bridge Monitor</h1>
+  <span class="live"><span id="dot" class="dot"></span><span id="liveText">connecting…</span></span>
+  <span class="spacer"></span>
+  <input id="q" type="search" placeholder="Search messages…" aria-label="Search messages">
+  <select id="type" aria-label="Filter by message type"><option value="">All types</option></select>
+</header>
+<div class="layout">
+  <aside>
+    <h2>Agents</h2>
+    <div id="agents"></div>
+    <h2>Threads</h2>
+    <div id="threads"></div>
+    <p class="note">Read-only view of this machine's bridge log. Only reachable from this computer.</p>
+  </aside>
+  <main id="timeline" aria-live="polite"></main>
+</div>
+<script nonce="__NONCE__">
+(() => {
+  const token = new URLSearchParams(location.search).get('t') || '';
+  const q = (s) => document.querySelector(s);
+  const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; };
+
+  const ROLE_COLORS = { backend: '#2563eb', mobile: '#16a34a', frontend: '#9333ea', web: '#9333ea', qa: '#d97706', bridge: '#6b7280' };
+  const TYPE_COLORS = {
+    hello: '#64748b', test_scenarios: '#2563eb', ui_testable_scenarios: '#0891b2', data_request: '#d97706', data_response: '#16a34a',
+    test_progress: '#0d9488', bug_report: '#dc2626', fix_ready: '#7c3aed', retest_result: '#0d9488', question: '#ca8a04', answer: '#65a30d',
+    ack: '#64748b', declined: '#b91c1c', blocked: '#ea580c', final_report: '#1d4ed8', peer_joined: '#6b7280', peer_left: '#6b7280',
+  };
+  const hue = (s) => { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return `hsl(${h} 55% 45%)`; };
+  const roleColor = (r) => ROLE_COLORS[r] || hue(r || '?');
+  const typeColor = (t) => TYPE_COLORS[t] || hue(t || '?');
+
+  let state = { me: null, peers: [], messages: [] };
+  let filter = { thread: '', type: '', text: '' };
+  let connected = false;
+
+  const api = (p) => `${p}${p.includes('?') ? '&' : '?'}t=${encodeURIComponent(token)}`;
+  const fmtTime = (ts) => { if (!ts) return ''; const d = new Date(ts); return isNaN(d) ? '' : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+  const fmtSize = (n) => n == null ? '' : n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(1)} KB` : `${(n / 1048576).toFixed(1)} MB`;
+  const isMine = (m) => state.me && m.from && m.from.id === state.me.id;
+  const isSystem = (m) => m.from && m.from.id === 'bridge';
+  const byId = () => new Map(state.messages.map((m) => [m.id, m]));
+  const nameOf = (id) => { const p = state.peers.find((x) => x.id === id); return p ? `${p.role}` : id; };
+
+  function setLive(on, text) {
+    connected = on;
+    q('#dot').className = 'dot ' + (on ? 'on' : 'off');
+    q('#liveText').textContent = text;
+  }
+
+  function avatar(role) {
+    const a = el('div', 'avatar', (role || '?').slice(0, 2));
+    a.style.background = roleColor(role);
+    return a;
+  }
+
+  function renderAgents() {
+    const box = q('#agents'); box.replaceChildren();
+    const list = state.peers.length ? state.peers : [];
+    if (!list.length) { box.append(el('div', 'note', 'No agents connected yet.')); return; }
+    for (const p of list) {
+      const row = el('div', 'agent');
+      const meta = el('div', 'meta');
+      meta.append(el('div', 'name', `${p.name || p.role}${state.me && p.id === state.me.id ? ' (this machine)' : ''}`));
+      const bits = [p.role, p.is_host ? 'host' : null, p.version ? `v${p.version}` : null, p.online === false ? 'offline' : p.online ? 'online' : null].filter(Boolean);
+      meta.append(el('div', 'sub', bits.join(' · ')));
+      row.append(avatar(p.role), meta);
+      box.append(row);
+    }
+  }
+
+  function renderThreads() {
+    const counts = new Map();
+    for (const m of state.messages) { if (isSystem(m)) continue; const k = m.thread_id || ''; counts.set(k, (counts.get(k) || 0) + 1); }
+    const box = q('#threads'); box.replaceChildren();
+    const mk = (key, label, n) => {
+      const b = el('button', 'thread' + (filter.thread === key ? ' active' : ''));
+      b.append(el('span', null, label), el('span', 'count', n));
+      b.addEventListener('click', () => { filter.thread = key; render(); });
+      return b;
+    };
+    box.append(mk('', 'All messages', state.messages.length));
+    for (const [k, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) box.append(mk(k || '__none__', k || '(no thread)', n));
+  }
+
+  function renderTypes() {
+    const sel = q('#type'); const cur = sel.value;
+    const types = [...new Set(state.messages.map((m) => m.type))].sort();
+    sel.replaceChildren(el('option', null, 'All types'));
+    sel.firstChild.value = '';
+    for (const t of types) { const o = el('option', null, t); o.value = t; sel.append(o); }
+    sel.value = types.includes(cur) ? cur : '';
+  }
+
+  function bodyView(body) {
+    const wrap = el('div');
+    if (body == null) return wrap;
+    if (typeof body === 'string') { wrap.append(el('div', 'text', body)); return wrap; }
+    // Show short top-level fields as a readable list, and the full JSON behind a toggle.
+    if (typeof body === 'object' && !Array.isArray(body)) {
+      const kv = el('div', 'kv'); let shown = 0;
+      for (const [k, v] of Object.entries(body)) {
+        if (v == null || (typeof v === 'object' && JSON.stringify(v).length > 160)) continue;
+        kv.append(el('div', 'k', k), el('div', 'v', typeof v === 'object' ? JSON.stringify(v) : v));
+        if (++shown >= 8) break;
+      }
+      if (shown) wrap.append(kv);
+    }
+    const json = JSON.stringify(body, null, 2);
+    const d = el('details', 'json');
+    d.open = json.length < 700 && !wrap.childElementCount;
+    d.append(el('summary', null, `JSON (${json.length.toLocaleString()} chars)`), el('pre', null, json.length > 40000 ? json.slice(0, 40000) + '\n…' : json));
+    wrap.append(d);
+    return wrap;
+  }
+
+  function attachmentsView(list) {
+    const box = el('div', 'atts');
+    for (const a of list || []) {
+      const img = a.file && /^image\//.test(a.mime || '');
+      if (a.file) {
+        const link = el('a', 'att' + (img ? ' thumb' : ''));
+        link.href = api(`/files/${a.file.split('/').map(encodeURIComponent).join('/')}`);
+        link.target = '_blank'; link.rel = 'noopener noreferrer';
+        if (img) { const i = document.createElement('img'); i.src = link.href; i.alt = a.name; link.append(i); }
+        link.append(el('span', null, `📎 ${a.name} · ${fmtSize(a.size)}`));
+        box.append(link);
+      } else {
+        box.append(el('span', 'att', `📎 ${a.name} · ${fmtSize(a.size)}`));
+      }
+    }
+    return box;
+  }
+
+  function messageView(m, map) {
+    if (isSystem(m)) {
+      const p = m.body && m.body.peer;
+      const text = m.type === 'peer_joined' ? `${p ? `${p.role} "${p.name}"` : 'an agent'} joined` : m.type === 'peer_left' ? `${p ? `${p.role} "${p.name}"` : 'an agent'} left` : m.type;
+      const s = el('div', 'system'); s.append(el('span', null, `${text} · ${fmtTime(m.ts)}`)); s.id = 'm-' + m.id; return s;
+    }
+    const row = el('div', 'msg' + (isMine(m) ? ' mine' : ''));
+    row.id = 'm-' + m.id;
+    const card = el('div', 'card');
+    const head = el('div', 'head');
+    head.append(el('span', 'who', `${m.from ? m.from.name || m.from.role : '?'}`));
+    const to = m.to === '*' ? 'everyone' : nameOf(m.to);
+    head.append(el('span', 'arrow', `→ ${to}`));
+    const b = el('span', 'badge', m.type);
+    const c = typeColor(m.type);
+    b.style.color = c; b.style.borderColor = c; b.style.background = `color-mix(in srgb, ${c} 12%, transparent)`;
+    head.append(b);
+    if (m.thread_id) head.append(el('span', 'tag', `# ${m.thread_id}`));
+    head.append(el('span', 'time', fmtTime(m.ts)));
+    card.append(head);
+    if (m.reply_to) {
+      const orig = map.get(m.reply_to);
+      const r = el('div', 'reply', `↩ reply to ${orig ? `${orig.type} from ${orig.from ? orig.from.role : '?'}` : m.reply_to}`);
+      r.addEventListener('click', () => { const t = document.getElementById('m-' + m.reply_to); if (t) { t.scrollIntoView({ behavior: 'smooth', block: 'center' }); t.classList.remove('flash'); void t.offsetWidth; t.classList.add('flash'); } });
+      card.append(r);
+    }
+    card.append(bodyView(m.body));
+    if (m.attachments && m.attachments.length) card.append(attachmentsView(m.attachments));
+    row.append(avatar(m.from && m.from.role), card);
+    return row;
+  }
+
+  function visible(m) {
+    if (filter.thread === '__none__' ? m.thread_id : filter.thread && m.thread_id !== filter.thread) return false;
+    if (filter.thread && isSystem(m)) return false;
+    if (filter.type && m.type !== filter.type) return false;
+    if (filter.text) {
+      const hay = `${m.type} ${m.thread_id || ''} ${m.from ? m.from.name + ' ' + m.from.role : ''} ${typeof m.body === 'string' ? m.body : JSON.stringify(m.body)} ${(m.attachments || []).map((a) => a.name).join(' ')}`.toLowerCase();
+      if (!hay.includes(filter.text)) return false;
+    }
+    return true;
+  }
+
+  function render(newIds = new Set()) {
+    const main = q('#timeline');
+    const nearBottom = main.scrollHeight - main.scrollTop - main.clientHeight < 120;
+    renderAgents(); renderThreads();
+    const map = byId();
+    const list = state.messages.filter(visible);
+    main.replaceChildren();
+    if (!list.length) {
+      main.append(el('div', 'empty', state.messages.length ? 'No messages match the filter.' : 'No messages yet. They appear here live as the agents talk.'));
+      return;
+    }
+    for (const m of list) {
+      const v = messageView(m, map);
+      if (newIds.has(m.id)) v.classList.add('flash');
+      main.append(v);
+    }
+    if (nearBottom || newIds.size === 0) main.scrollTop = main.scrollHeight;
+  }
+
+  const sortMsgs = () => state.messages.sort((a, b) => (a.ts || '').localeCompare(b.ts || '') || (a.seq || 0) - (b.seq || 0));
+
+  async function load() {
+    const res = await fetch(api('/api/state'));
+    if (!res.ok) { setLive(false, `error ${res.status}`); q('#timeline').replaceChildren(el('div', 'empty', res.status === 401 ? 'Wrong or missing token. Open the exact URL that `bridge dashboard` printed.' : `Could not load (${res.status}).`)); return; }
+    const data = await res.json();
+    state = { me: data.me, peers: data.peers || [], messages: data.messages || [] };
+    sortMsgs(); renderTypes(); render();
+    document.title = `Agent Bridge Monitor · ${state.me ? state.me.role : 'bridge'}`;
+    listen();
+  }
+
+  function listen() {
+    const es = new EventSource(api('/api/events'));
+    es.onopen = () => setLive(true, 'live');
+    es.onerror = () => setLive(false, 'reconnecting…');
+    es.addEventListener('messages', (e) => {
+      const fresh = JSON.parse(e.data);
+      const have = new Set(state.messages.map((m) => m.id));
+      const add = fresh.filter((m) => !have.has(m.id));
+      if (!add.length) return;
+      state.messages.push(...add); sortMsgs(); renderTypes();
+      render(new Set(add.map((m) => m.id)));
+    });
+    es.addEventListener('peers', (e) => { const p = JSON.parse(e.data); state.me = p.me || state.me; state.peers = p.peers || []; renderAgents(); });
+  }
+
+  q('#q').addEventListener('input', (e) => { filter.text = e.target.value.trim().toLowerCase(); render(); });
+  q('#type').addEventListener('change', (e) => { filter.type = e.target.value; render(); });
+  load().catch((e) => setLive(false, 'offline'));
+})();
+</script>
+</body>
+</html>

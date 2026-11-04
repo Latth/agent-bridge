@@ -14,6 +14,7 @@
 //   log      [--n 20]                  recent messages sent/received from this machine
 //   close                              host: stop relay + tunnel and revoke all keys; peer: leave
 //   version                            agent-bridge version of this machine
+//   dashboard [--port 7879] [--open] [--stop]   local read-only web view of the conversation
 //
 // Global: --dir <state dir> (default ./.agent-bridge or $AGENT_BRIDGE_DIR), --json for machine-readable output.
 // Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running.
@@ -30,6 +31,7 @@ import {
 } from './lib.mjs';
 
 const SERVER_SCRIPT = fileURLToPath(new URL('./bridge-server.mjs', import.meta.url));
+const DASHBOARD_SCRIPT = fileURLToPath(new URL('./dashboard-server.mjs', import.meta.url));
 
 // ---------- args ----------
 function parseArgs(argv) {
@@ -63,6 +65,7 @@ const F = {
   inbox: path.join(DIR, 'inbox'),
   serverLog: path.join(DIR, 'server.log'),
   tunnelLog: path.join(DIR, 'tunnel.log'),
+  dash: path.join(DIR, 'dashboard.json'),
 };
 
 class CliError extends Error {
@@ -608,9 +611,63 @@ function cmdLog() {
   }).join('\n'), items);
 }
 
+// ---------- dashboard ----------
+function stopDashboard() {
+  const d = readJson(F.dash);
+  if (d?.pid && pidAlive(d.pid)) { try { process.kill(d.pid); } catch {} }
+  fs.rmSync(F.dash, { force: true });
+  return !!d?.pid;
+}
+
+function openInBrowser(url) {
+  const [cmd, args] = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]] : process.platform === 'darwin' ? ['open', [url]] : ['xdg-open', [url]];
+  try { spawn(cmd, args, { detached: true, stdio: 'ignore', windowsHide: true }).unref(); } catch {}
+}
+
+async function cmdDashboard() {
+  if (opts.stop) {
+    const was = stopDashboard();
+    return out(was ? 'dashboard stopped' : 'no dashboard was running', { ok: true });
+  }
+  const hasLogs = fs.existsSync(F.log) || fs.existsSync(path.join(DIR, 'server-messages.jsonl'));
+  if (!hasLogs && !readJson(F.session)) die(`no bridge state in ${DIR} yet. Start or join a bridge first (or pass --dir).`);
+  ensureDir(DIR);
+  const running = readJson(F.dash);
+  let url;
+  if (running?.pid && pidAlive(running.pid) && running.url) {
+    url = running.url;
+  } else {
+    const port = Number(opts.port || 7879);
+    const token = b64u(crypto.randomBytes(24)); // the URL is the key: anyone with it can read the log
+    fs.rmSync(F.dash, { force: true });
+    const fd = fs.openSync(path.join(DIR, 'dashboard.log'), 'a');
+    const child = spawn(process.execPath, [DASHBOARD_SCRIPT, '--dir', DIR, '--port', String(port), '--token', token], { detached: true, stdio: ['ignore', fd, fd], windowsHide: true });
+    child.unref();
+    fs.closeSync(fd);
+    const deadline = Date.now() + 6_000;
+    let info = null;
+    while (Date.now() < deadline) {
+      await sleep(150);
+      info = readJson(F.dash);
+      if (info?.error) die(`dashboard failed to start: ${info.error} (port ${port} busy? try --port ${port + 1})`);
+      if (info?.pid === child.pid && info.url) break;
+      if (!pidAlive(child.pid)) die(`dashboard exited during startup; see ${path.join(DIR, 'dashboard.log')}`);
+    }
+    if (!info?.url) die('dashboard did not start in time');
+    url = info.url;
+  }
+  if (opts.open) openInBrowser(url);
+  out([
+    `dashboard: ${url}`,
+    'Read-only live view of this machine\'s bridge log, reachable only from this computer (127.0.0.1).',
+    'The link contains an access token: share it only with people on this machine. Stop it with `dashboard --stop`.',
+  ].join('\n'), { url, running: !!running?.pid });
+}
+
 async function cmdClose() {
   const sess = readJson(F.session);
-  if (!sess) return out('nothing to close', { ok: true });
+  const dash = stopDashboard() ? ' Dashboard stopped (run `dashboard` again to read the log).' : '';
+  if (!sess) return out(`nothing to close.${dash}`, { ok: true });
   if (sess.is_host) {
     try { await rpc(sess, 'shutdown', {}, 5_000); } catch {}
     const srv = readJson(F.server);
@@ -620,17 +677,17 @@ async function cmdClose() {
     if (tunnel?.pid && pidAlive(tunnel.pid)) { try { process.kill(tunnel.pid); } catch {} }
     // Deleting server-state.json revokes every session key; peers must pair again next time.
     for (const f of [F.session, F.server, F.tunnel, F.state, F.lock]) fs.rmSync(f, { force: true });
-    out('bridge closed: relay and tunnel stopped, all peer keys revoked. Message log kept in messages.jsonl.', { ok: true });
+    out(`bridge closed: relay and tunnel stopped, all peer keys revoked. Message log kept in messages.jsonl.${dash}`, { ok: true });
   } else {
     try { await rpc(sess, 'leave', {}, 5_000); } catch {}
     for (const f of [F.session, F.lock]) fs.rmSync(f, { force: true });
-    out('left the bridge; local session removed. Message log kept in messages.jsonl.', { ok: true });
+    out(`left the bridge; local session removed. Message log kept in messages.jsonl.${dash}`, { ok: true });
   }
 }
 
 // ---------- main ----------
 const cmdVersion = () => out(`agent-bridge ${SKILL_VERSION} (protocol ${PROTOCOL})`, { version: SKILL_VERSION, protocol: PROTOCOL });
-const commands = { version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
+const commands = { dashboard: cmdDashboard, version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
 const fn = commands[command];
 if (!fn) {
   const usage = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1).filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n');

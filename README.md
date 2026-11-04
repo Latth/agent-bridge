@@ -7,14 +7,14 @@
 A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
 accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
-[![version](https://img.shields.io/badge/version-1.1.0-2563eb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.2.0-2563eb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
-[![tests](https://img.shields.io/badge/tests-19%20passing-16a34a)](tests)
+[![tests](https://img.shields.io/badge/tests-28%20passing-16a34a)](tests)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20plugin-d97757)](https://claude.com/claude-code)
 
-[Quick start](#-quick-start) · [How it works](#-how-it-works) · [Commands](#-commands) ·
+[Quick start](#-quick-start) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
 [Security](#-security) · [FAQ](#-faq) · [Changelog](CHANGELOG.md)
 
 </div>
@@ -96,6 +96,25 @@ you what is happening.
 > If the host restarts, the free ngrok plan gives it a new URL. Run `host` again. Peers that were already
 > paired only need `/agent-bridge resume <new-url>`; no new code is needed until someone runs `close`.
 
+## 👀 Watch the conversation
+
+Ask your agent to *"open the bridge dashboard"* (it runs `bridge dashboard --open`). You get a live web view
+of what the agents are saying to each other:
+
+<p align="center"><img src="docs/dashboard.jpg" alt="Agent Bridge Monitor: agents and threads on the left, a live timeline of typed messages with an attached screenshot on the right" width="820"></p>
+
+- **Live**: new messages appear within a second, without a reload
+- **Readable**: each agent has its own color, each message type has a badge, and the main fields of a body
+  are shown as a short list with the full JSON one click away
+- **Navigable**: threads in the sidebar, search, a filter by type, and "reply to" links that jump to the
+  original message
+- **Evidence**: received screenshots are previewed inline
+- **Private**: it runs on `127.0.0.1` only, behind a random token, and never goes through ngrok. Peer content
+  can't run script in your browser.
+
+It works on both sides. The host sees everything that passes through the relay; a peer sees what it sent and
+received.
+
 ## 🧠 How it works
 
 ```mermaid
@@ -132,6 +151,7 @@ The agent runs these for you. You only need them for debugging.
 | `wait [--timeout 1800]` | Wait for the next message (exit `0`) or a timeout (exit `2`) |
 | `status` · `inbox` · `log` | Peers and versions, unread messages, history |
 | `code` · `kick <peer>` · `close` | (host) New pairing code, remove a peer, end the bridge and revoke all keys |
+| `dashboard [--open] [--stop]` | Local, live, read-only web view of the conversation |
 | `version` | This machine's agent-bridge version |
 
 They are all `node scripts/bridge.mjs <command>`. State lives in `.agent-bridge/` in the project, which
@@ -162,7 +182,7 @@ personal data. Details are in [references/security.md](references/security.md).
 
 | | |
 |---|---|
-| ✅ **Relay and CLI** | 19 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse (`node --test tests/*.test.mjs`) |
+| ✅ **Relay, CLI and dashboard** | 28 automated tests: pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, and the dashboard's token, Host check, key hygiene, file paths and live stream (`node --test tests/*.test.mjs`) |
 | ✅ **Agent behavior** | 4 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report. **26/26 checks with the skill, 19/26 without** ([eval harness](tests/eval-harness/README.md)) |
 | ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
 | ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |
@@ -216,7 +236,8 @@ the older side with `git pull` or through `/plugin`.
 
 ```
 SKILL.md                  what Claude follows when the skill runs
-scripts/                  relay + CLI (Node.js, zero dependencies)
+scripts/                  relay + CLI + dashboard (Node.js, zero dependencies)
+docs/                     images for this README
 references/               protocol · security · networking · role playbooks · mobile & web testing
 .claude-plugin/           plugin + marketplace manifests
 tests/*.test.mjs          relay/CLI tests

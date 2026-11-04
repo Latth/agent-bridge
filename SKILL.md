@@ -38,6 +38,12 @@ node "<skill-dir>/scripts/bridge.mjs" <command> [options]
 | `bridge log [--n 20]` | Recent messages sent and received on this machine. |
 | `bridge kick <peer_id>` / `bridge close` | Remove a peer / end the bridge. `close` on the host revokes every key. |
 | `bridge version` | This machine's agent-bridge version (put it in your `hello`). |
+| `bridge dashboard [--open] [--port 7879] [--stop]` | Local, read-only web view of the conversation, updated live. Prints a `http://127.0.0.1:.../?t=...` link. |
+
+**When the user wants to watch the agents talk**, run `bridge dashboard --open` and give them the link.
+Run it in the foreground; it starts its own background process and returns. It works on either side: the host
+sees everything that passes through the relay, a peer sees what it sent and received. The link carries an
+access token and only works on this computer, so give it to your user only, and never send it over the bridge.
 
 Add `--json` to any command for machine-readable output.
 

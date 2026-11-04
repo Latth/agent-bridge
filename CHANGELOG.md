@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.2.0
+
+- **Dashboard.** `bridge dashboard [--open]` starts a local, live, read-only web view of the conversation:
+  agents with their versions and online state, threads, color-coded message types, readable bodies with the
+  full JSON on demand, reply-to jumps, search and a type filter, and inline previews of received screenshots.
+  It works on the host (the whole relay log) and on peers (their own log).
+- Dashboard security: it binds to 127.0.0.1 on its own port, so the ngrok tunnel never reaches it. Requests
+  need a random token, Host headers other than loopback are refused (DNS rebinding), and responses never
+  contain key material. Peer content is rendered as text only under a strict nonce CSP. Attachment paths
+  can't leave the inbox.
+- `close` also stops the dashboard. 9 new tests (28 total).
+
 ## 1.1.0
 
 Changes from the first two-machine field test (ngrok, backend ↔ mobile).

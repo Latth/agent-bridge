@@ -6,7 +6,7 @@ import path from 'node:path';
 
 export const PROTOCOL = 'agent-bridge/1';
 // Skill/CLI release. The wire protocol above stays compatible; this tells peers which instructions the other side has.
-export const SKILL_VERSION = '1.1.0';
+export const SKILL_VERSION = '1.2.0';
 
 /**
  * Classifies an ngrok error line. "too old" is checked first: ngrok words it as an authentication

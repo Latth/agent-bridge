@@ -10,6 +10,7 @@
 | ngrok itself | ngrok terminates TLS, but message payloads are additionally encrypted end to end, so ngrok sees only ciphertext (plus the pairing handshake, which reveals no key). |
 | A fake relay ("connect" to the wrong address) | The relay must prove it knows the pairing code, otherwise the client refuses to connect. |
 | Key left on disk | The key lives in `.agent-bridge/session.json` (git-ignored automatically). `close` on the host revokes all keys. |
+| The dashboard | It listens on `127.0.0.1` on its own port, so the ngrok tunnel, which forwards only the relay port, never reaches it. Every request needs the random token in its link, and Host headers other than loopback are refused, which blocks DNS rebinding. It is read-only and never returns key material. Peer content is rendered as text under a strict CSP with a nonce, so a message cannot run script in your browser. |
 
 Known limits:
 - Anyone holding the code within its 15 minutes can pair. Pass it through a channel you trust (team chat DM,
