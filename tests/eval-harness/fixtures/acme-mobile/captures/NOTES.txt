@@ -1,0 +1,2 @@
+Attempts 3-5 are omitted from this capture: same pattern, each one 401 (req_9a03..req_9a05). Attempt 6 is the 500.
+Screenshot S2-lockout.png shows the generic error toast "Bir hata oluştu" instead of the lockout message.

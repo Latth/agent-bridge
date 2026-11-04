@@ -1,0 +1,3 @@
+S2 run with Playwright (chromium 129) against https://app.staging.acme.dev on 2026-11-04.
+Attempts 3-5 are omitted from the HAR: same pattern, each 401 (req_7f03..req_7f05). Attempt 6 is the 500.
+S2-lockout.png: page shows role=alert "Bir hata oluştu" instead of the lockout message.

@@ -1,0 +1,6 @@
+[2026-11-04T10:40:02.101Z] [debug] auth state {"accessToken":"eyJhbGciOiJIUzI1NiJ9.SECRET-WEB-TOKEN-3391.sig","refreshToken":"refresh-PRIVATE-7702","userId":"u_48213"}
+[2026-11-04T10:40:11.400Z] [debug] auth state {"accessToken":"eyJhbGciOiJIUzI1NiJ9.SECRET-WEB-TOKEN-3391.sig","refreshToken":"refresh-PRIVATE-7702","userId":"u_48213"}
+[2026-11-04T10:40:11.716Z] [error] Failed to load resource: the server responded with a status of 401 ()
+[2026-11-04T10:40:27.549Z] [debug] auth state {"accessToken":"eyJhbGciOiJIUzI1NiJ9.SECRET-WEB-TOKEN-3391.sig","refreshToken":"refresh-PRIVATE-7702","userId":"u_48213"}
+[2026-11-04T10:40:27.569Z] [error] Failed to load resource: the server responded with a status of 500 ()
+[2026-11-04T10:40:27.571Z] [error] chip-login failed Error: HTTP 500 at api (webpack-internal:///./src/lib/api.ts:17:25)

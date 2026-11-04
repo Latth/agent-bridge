@@ -1,0 +1,8 @@
+android {
+    namespace "dev.acme.mobile"
+    defaultConfig { applicationId "dev.acme.mobile"; minSdk 26; targetSdk 34 }
+    productFlavors {
+        staging { applicationIdSuffix ".staging"; buildConfigField "String", "API_BASE", '"https://api.staging.acme.dev"' }
+        prod { buildConfigField "String", "API_BASE", '"https://api.acme.com"' }
+    }
+}

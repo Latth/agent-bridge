@@ -1,0 +1,66 @@
+{
+  "role": "backend",
+  "name": "BE Agent (test peer)",
+  "thread": "login-v2",
+  "on_join": [
+    {
+      "type": "hello",
+      "body": {
+        "role": "backend",
+        "project": {
+          "name": "acme-api"
+        },
+        "environment": "staging",
+        "capabilities": {
+          "can_create_test_data": true,
+          "can_read_server_logs": true,
+          "staging_base_url": "https://api.staging.acme.dev"
+        }
+      }
+    },
+    {
+      "type": "test_scenarios",
+      "body": {
+        "feature": "Login v2: chip number login",
+        "change_summary": "New POST /v2/auth/chip-login; lockout after 5 failed attempts.",
+        "endpoints": [
+          {
+            "method": "POST",
+            "path": "/v2/auth/chip-login",
+            "notes": "body: { chipNumber, pin }"
+          }
+        ],
+        "test_data": {
+          "user": "u_48213",
+          "chips": {
+            "S1": "9900112233 (PIN 4821)",
+            "S2": "9900112234 (lockout counter 0)"
+          }
+        },
+        "scenarios": [
+          {
+            "id": "S1",
+            "title": "Login with a valid chip number",
+            "layer": "both",
+            "expected": "Home screen; 200"
+          },
+          {
+            "id": "S2",
+            "title": "Lockout after 5 wrong PINs",
+            "layer": "both",
+            "steps": [
+              "Login screen",
+              "chip 9900112234",
+              "wrong PIN 6 times"
+            ],
+            "expected": "6th attempt: API returns 423 and the app shows the lockout message"
+          }
+        ]
+      }
+    }
+  ],
+  "stop_on_types": [
+    "bug_report"
+  ],
+  "grace_seconds": 45
+}

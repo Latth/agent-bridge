@@ -1,0 +1,56 @@
+{
+  "role": "mobile",
+  "name": "Mobile Agent (test peer)",
+  "thread": "login-v2",
+  "on_join": [
+    {
+      "type": "hello",
+      "body": {
+        "role": "mobile",
+        "project": {
+          "name": "acme-mobile",
+          "platform": "android"
+        },
+        "environment": "staging",
+        "capabilities": {
+          "devices": [
+            "emulator-5554 (Pixel 7, Android 14)"
+          ],
+          "tools": [
+            "adb",
+            "logcat",
+            "maestro"
+          ],
+          "can_create_test_data": false
+        }
+      }
+    },
+    {
+      "type": "data_request",
+      "body": {
+        "environment": "staging",
+        "user": {
+          "id": "u_48213",
+          "source": "logged-in user on emulator-5554"
+        },
+        "needs": [
+          {
+            "scenario_id": "S1",
+            "kind": "chip_number",
+            "details": "active chip linked to u_48213, PIN known, lockout counter 0"
+          },
+          {
+            "scenario_id": "S4",
+            "kind": "task",
+            "details": "one open task assigned to u_48213"
+          }
+        ]
+      }
+    }
+  ],
+  "stop_on_types": [
+    "data_response",
+    "declined"
+  ],
+  "grace_seconds": 45
+}

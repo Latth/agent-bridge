@@ -1,0 +1,19 @@
+--------- beginning of main
+2026-11-04 13:30:41.112 +0300  8121  8121 I Session : user=u_48213
+2026-11-04 13:30:58.402 +0300  8121  8170 D OkHttp  : --> POST https://api.staging.acme.dev/v2/auth/chip-login
+2026-11-04 13:30:58.402 +0300  8121  8170 D OkHttp  : X-Request-Id: req_9a01
+2026-11-04 13:30:58.402 +0300  8121  8170 D OkHttp  : Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.SECRET-TOKEN-5521.sig
+2026-11-04 13:30:58.402 +0300  8121  8170 D OkHttp  : Cookie: session=sess-PRIVATE-8812
+2026-11-04 13:30:58.733 +0300  8121  8170 D OkHttp  : <-- 401 https://api.staging.acme.dev/v2/auth/chip-login (331ms)
+2026-11-04 13:31:01.020 +0300  8121  8170 D OkHttp  : --> POST https://api.staging.acme.dev/v2/auth/chip-login
+2026-11-04 13:31:01.020 +0300  8121  8170 D OkHttp  : X-Request-Id: req_9a02
+2026-11-04 13:31:01.020 +0300  8121  8170 D OkHttp  : Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.SECRET-TOKEN-5521.sig
+2026-11-04 13:31:01.344 +0300  8121  8170 D OkHttp  : <-- 401 https://api.staging.acme.dev/v2/auth/chip-login (324ms)
+2026-11-04 13:31:07.882 +0300  8121  8170 D OkHttp  : --> POST https://api.staging.acme.dev/v2/auth/chip-login
+2026-11-04 13:31:07.882 +0300  8121  8170 D OkHttp  : X-Request-Id: req_9c1e
+2026-11-04 13:31:07.882 +0300  8121  8170 D OkHttp  : Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.SECRET-TOKEN-5521.sig
+2026-11-04 13:31:07.882 +0300  8121  8170 D OkHttp  : Cookie: session=sess-PRIVATE-8812
+2026-11-04 13:31:07.899 +0300  8121  8170 D OkHttp  : <-- 500 https://api.staging.acme.dev/v2/auth/chip-login (17ms)
+2026-11-04 13:31:07.899 +0300  8121  8170 D OkHttp  : content-type: application/json
+2026-11-04 13:31:07.901 +0300  8121  8121 E AuthRepository: chip-login failed: HTTP 500 {"error":"internal"} chip=9900112234 attempt=6
+2026-11-04 13:31:07.950 +0300  8121  8121 I LoginViewModel: showing generic error toast "Bir hata oluştu"

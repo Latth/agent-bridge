@@ -1,0 +1,11 @@
+{
+  "env": "staging",
+  "users": [
+    { "id": "u_48213", "name": "Test User 48213", "status": "active" },
+    { "id": "u_50001", "name": "Test User 50001", "status": "active" }
+  ],
+  "chips": [
+    { "chipNumber": "9900000001", "pin": "1111", "userId": "u_50001", "status": "active", "lockoutCounter": 0 }
+  ],
+  "tasks": []
+}

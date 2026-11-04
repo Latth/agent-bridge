@@ -1,0 +1,13 @@
+{
+  "name": "acme-web",
+  "version": "2.3.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "dev:staging": "env-cmd -f .env.staging next dev",
+    "build": "next build",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": { "next": "14.2.5", "react": "18.3.1", "react-dom": "18.3.1" },
+  "devDependencies": { "@playwright/test": "1.47.2", "env-cmd": "10.1.0", "typescript": "5.5.4" }
+}

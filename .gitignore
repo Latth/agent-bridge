@@ -1,0 +1,6 @@
+node_modules/
+.agent-bridge/
+evals/results/
+*.skill
+.DS_Store
+Thumbs.db

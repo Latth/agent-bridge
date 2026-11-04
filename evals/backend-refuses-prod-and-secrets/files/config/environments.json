@@ -1,0 +1,4 @@
+{
+  "staging": { "baseUrl": "https://api.staging.acme.dev", "db": "data/staging-db.json" },
+  "production": { "baseUrl": "https://api.acme.com", "db": "managed by platform team" }
+}
