@@ -18,6 +18,10 @@
 //   dashboard [--port 7879] [--open] [--stop]   local web view: live conversation, approvals, notes to your agent
 //   report   [--thread <id>] [--out file.md]    Markdown report of the test cycle (scenarios, bugs, data, timeline)
 //   approval request --title "..." [--details "..."] | wait <id> | resolve <id> --approve|--decline | list
+//   case     new <name> [--template investigation|sweep|blank] [--title "..."]   start a shared case file (local draft)
+//            put <name> [--note "..."] [--ask "..."] [--to <role>]   share your edits (new version, wakes the peer)
+//            get <name> [--version N] [--full]   fetch the latest version; prints only what changed since your copy
+//            list | log <name>
 //
 // Global: --dir <state dir> (default ./.agent-bridge or $AGENT_BRIDGE_DIR), --json for machine-readable output.
 // Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running,
@@ -31,7 +35,7 @@ import { fileURLToPath } from 'node:url';
 import {
   PROTOCOL, SKILL_VERSION, compareVersions, ngrokErrorKind, scanSecrets, DEFAULT_PORT, MAX_ATTACHMENT_BYTES, LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, pairProof,
   safeEqual, genKeyPair, deriveSessionKey, seal, open, requestAad, responseAad, resolveStateDir, ensureDir,
-  readJson, writeJsonPrivate, appendJsonl, pidAlive, safeFileName,
+  readJson, writeJsonPrivate, appendJsonl, pidAlive, safeFileName, CASE_SLUG_RE, MAX_CASE_BYTES, lineDiff,
 } from './lib.mjs';
 import { buildReport } from './report.mjs';
 
@@ -75,6 +79,8 @@ const F = {
   notes: path.join(DIR, 'notes.jsonl'),
   serverLog: path.join(DIR, 'server-messages.jsonl'),
   reports: path.join(DIR, 'reports'),
+  cases: path.join(DIR, 'cases'),
+  relayCases: path.join(DIR, 'relay-cases'),
 };
 
 class CliError extends Error {
@@ -182,6 +188,7 @@ function formatMessage(m, i, sess, savedPaths = [], maxBody = DEFAULT_MAX_BODY) 
   let body = m.body == null ? '' : typeof m.body === 'string' ? m.body : JSON.stringify(m.body);
   if (body.length > maxBody) body = `${body.slice(0, maxBody)} …[+${body.length - maxBody} chars cut; full body: ${saveFullBody(m)}]`;
   if (body) lines.push(body);
+  if (m.type === 'case_updated' && CASE_SLUG_RE.test(String(m.body?.case ?? ''))) lines.push(`  → run \`case get ${m.body.case}\` for what changed`);
   (m.attachments || []).forEach((a, k) => lines.push(`  attachment: ${savedPaths[k] ?? a.name} (${a.mime}, ${a.size} B)`));
   return lines.join('\n');
 }
@@ -761,7 +768,7 @@ async function cmdReport() {
   const thread = opts.thread && opts.thread !== true ? String(opts.thread) : null;
   const msgs = loadConversation();
   if (!msgs.length) die(`no messages in ${DIR} yet`);
-  const md = buildReport(msgs, { thread, version: SKILL_VERSION });
+  const md = buildReport(msgs, { thread, version: SKILL_VERSION, cases: localCases() });
   const file = opts.out && opts.out !== true ? path.resolve(String(opts.out))
     : path.join(F.reports, `${safeFileName(thread || 'all-threads')}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-')}.md`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -769,6 +776,154 @@ async function cmdReport() {
   // Print the path, not the report: the agent rarely needs to read it, the user does.
   const count = (re) => (md.match(re) || []).length;
   out(`report: ${path.relative(process.cwd(), file) || file} (${count(/^\| S|^\| [A-Z]+\d/gm)} table rows, ${count(/^- `/gm)} timeline entries)`, { file, thread });
+}
+
+// ---------- shared case files ----------
+// Working copy: cases/<slug>.md (the agent edits this). Next to it, cases/<slug>.base.md is the version it was
+// based on and cases/<slug>.json records that version number, so `put` can tell the relay what it edited and
+// `get` can show only what changed since.
+const TEMPLATES_DIR = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'templates');
+const caseFiles = (slug) => ({
+  work: path.join(F.cases, `${slug}.md`),
+  base: path.join(F.cases, `${slug}.base.md`),
+  meta: path.join(F.cases, `${slug}.json`),
+});
+const rel = (p) => path.relative(process.cwd(), p) || p;
+const readText = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+const norm = (s) => String(s ?? '').replace(/\r\n/g, '\n');
+
+function caseSlug(raw) {
+  const slug = String(raw ?? '');
+  if (!CASE_SLUG_RE.test(slug)) die('usage: case <new|put|get|list|log> <name> — name is lowercase letters, digits and dashes, e.g. order-total-zero');
+  return slug;
+}
+
+function fillTemplate(kind, vars) {
+  const file = path.join(TEMPLATES_DIR, `case-${kind}.md`);
+  if (!fs.existsSync(file)) die(`--template must be one of: ${fs.readdirSync(TEMPLATES_DIR).map((f) => f.replace(/^case-|\.md$/g, '')).join(', ')}`);
+  return fs.readFileSync(file, 'utf8').replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+}
+
+async function cmdCase() {
+  const sub = pos[0];
+  const sess = sub === 'list' || sub === 'new' || sub === 'put' || sub === 'get' || sub === 'log' ? loadSession() : null;
+  if (!sess) die('usage: case new <name> [--template investigation|sweep|blank] [--title "..."] | put <name> [--note "..."] [--ask "..."] [--to <role>] | get <name> [--version N] [--full] | list | log <name>');
+  fs.mkdirSync(F.cases, { recursive: true });
+  const str = (k) => (opts[k] && opts[k] !== true ? String(opts[k]) : '');
+
+  if (sub === 'list') {
+    const r = await rpc(sess, 'case_list');
+    if (!r.cases.length) return out('no case files yet. Start one with `case new <name> --template investigation`', r);
+    return out(r.cases.map((c) => `${c.slug.padEnd(28)} v${String(c.version).padEnd(3)} ${c.updated?.by?.role ?? ''} ${clock(c.updated?.ts)}  ${c.title}`).join('\n'), r);
+  }
+
+  const slug = caseSlug(pos[1]);
+  const cf = caseFiles(slug);
+
+  if (sub === 'new') {
+    let exists = null;
+    try { exists = await rpc(sess, 'case_get', { slug }); } catch (e) { if (e.status !== 404) throw e; }
+    if (exists) die(`case "${slug}" already exists (v${exists.latest}, "${exists.title}"). Run \`case get ${slug}\` to join it.`);
+    if (fs.existsSync(cf.work) && !opts.force) die(`${rel(cf.work)} already exists locally; edit it and \`case put ${slug}\`, or pass --force to start over`);
+    const title = str('title') || slug.replace(/-/g, ' ');
+    const text = fillTemplate(str('template') || 'investigation', { title, slug, role: sess.role, date: new Date().toISOString().slice(0, 10) });
+    fs.writeFileSync(cf.work, text);
+    fs.rmSync(cf.base, { force: true });
+    writeJsonPrivate(cf.meta, { slug, version: 0, title });
+    return out(`draft: ${rel(cf.work)}\nFill in what you know, then share it: case put ${slug} --note "<what you added>" --ask "<what the other side should do>" --to <role>`, { slug, file: cf.work, version: 0 });
+  }
+
+  if (sub === 'put') {
+    const file = str('file') || cf.work;
+    const content = readText(file);
+    if (content == null) die(`no ${rel(file)}; start with \`case new ${slug}\` or \`case get ${slug}\``);
+    if (Buffer.byteLength(content) > MAX_CASE_BYTES) die(`case file is over ${MAX_CASE_BYTES / 1024} KB; move logs and dumps into message attachments and link them`);
+    const meta = readJson(cf.meta) ?? { slug, version: 0 };
+    if (meta.version > 0 && norm(readText(cf.base)) === norm(content)) die(`nothing changed since v${meta.version}; edit ${rel(file)} first`);
+    if (!opts['allow-secrets']) {
+      const found = scanSecrets(content);
+      if (found.length) die(`not shared: the case file looks like it contains secrets:\n  ${found.map((f) => `${f.kind} ${f.sample}`).join('\n  ')}\nRedact them and put again.`, 5);
+    }
+    const thread = str('thread') || lastThread() || slug;
+    const payload = { slug, title: str('title') || meta.title, content, base: meta.version, note: str('note'), ask: str('ask'), to: str('to') || '*', thread_id: thread };
+    const r = await rpc(sess, 'case_put', payload, 60_000);
+    fs.writeFileSync(cf.base, content);
+    if (file !== cf.work) fs.writeFileSync(cf.work, content);
+    writeJsonPrivate(cf.meta, { slug, version: r.version, title: r.title });
+    logLocal('out', { id: r.id, ts: new Date().toISOString(), from: { id: sess.peer_id, role: sess.role, name: sess.name }, to: payload.to, type: 'case_updated', thread_id: thread, reply_to: null, body: { case: slug, version: r.version, title: r.title, ...(payload.note && { note: payload.note }), ...(payload.ask && { ask: payload.ask }) }, attachments: [] });
+    const remind = listenerRunning() ? '' : '\nno listener running: start `wait` in the background now.';
+    const warn = r.recipients.length ? '' : '\nwarning: nobody was notified (no peer connected).';
+    return out(`case ${slug} v${r.version} shared → ${r.recipients.length} (#${thread})${warn}${remind}`, { ...r, thread_id: thread });
+  }
+
+  if (sub === 'get') {
+    const r = await rpc(sess, 'case_get', { slug, ...(opts.version && opts.version !== true ? { version: Number(opts.version) } : {}) });
+    const meta = readJson(cf.meta);
+    const base = readText(cf.base);
+    const work = readText(cf.work);
+    const dirty = work != null && (base == null ? meta?.version === 0 : norm(work) !== norm(base));
+    const e = r.entry;
+    const head = `case ${slug} v${r.version}${r.version !== r.latest ? ` (latest v${r.latest})` : ''} "${r.title}" · by ${e.by.role} ${clock(e.ts)}${e.note ? ` · ${e.note}` : ''}`;
+    const lines = [head];
+    if (e.ask) lines.push(`ask: ${e.ask}`);
+    let target = cf.work;
+    if (opts.version && opts.version !== true && r.version !== r.latest) {
+      target = path.join(F.cases, `${slug}.v${r.version}.md`); // an old version, for reading only
+      fs.writeFileSync(target, r.content);
+    } else if (dirty && meta?.version === r.version) {
+      lines.push(`no changes since v${r.version}; your unsent edits are in ${rel(cf.work)} (share them with \`case put ${slug}\`).`);
+      return out(lines.join('\n'), { ...r, file: cf.work, dirty });
+    } else if (dirty) {
+      // Unsent local edits: keep them, save the newer version beside them, and make the next put merge on top.
+      target = path.join(F.cases, `${slug}.v${r.version}.md`);
+      fs.writeFileSync(target, r.content);
+      fs.writeFileSync(cf.base, r.content);
+      writeJsonPrivate(cf.meta, { slug, version: r.version, title: r.title });
+      lines.push(`your unsent edits stay in ${rel(cf.work)}. v${r.version} is in ${rel(target)}: bring the changes below into your file, then put.`);
+    } else {
+      fs.writeFileSync(cf.work, r.content);
+      fs.writeFileSync(cf.base, r.content);
+      writeJsonPrivate(cf.meta, { slug, version: r.version, title: r.title });
+    }
+    lines.push(`file: ${rel(target)} (${r.content.length} chars)`);
+    if (opts.full) lines.push('', r.content);
+    else if (base != null && meta?.version && meta.version !== r.version) {
+      const d = lineDiff(base, r.content, opts['max-lines'] ? Number(opts['max-lines']) : 80);
+      lines.push(`changes since v${meta.version} (+${d.added} -${d.removed}):`, ...d.lines);
+      if (d.truncated) lines.push(`…more changes; read ${rel(target)}`);
+    } else if (base != null && meta?.version === r.version && !dirty) lines.push('no changes since your copy.');
+    else lines.push('first copy on this machine: read the file.');
+    return out(lines.join('\n'), { ...r, file: target, dirty });
+  }
+
+  if (sub === 'log') {
+    const r = await rpc(sess, 'case_get', { slug });
+    return out(r.history.map((h) => `v${h.version}  ${h.ts.slice(0, 16).replace('T', ' ')}  ${h.by.role.padEnd(10)} ${h.note || ''}${h.ask ? `  [ask: ${h.ask}]` : ''}`).join('\n'), r.history);
+  }
+  die('usage: case new|put|get|list|log');
+}
+
+/** Latest content of every case this machine knows: the relay store on the host, local copies on a peer. */
+function localCases() {
+  const list = [];
+  try {
+    for (const slug of fs.readdirSync(F.relayCases)) {
+      const meta = readJson(path.join(F.relayCases, slug, 'meta.json'));
+      const content = meta && readText(path.join(F.relayCases, slug, `v${meta.version}.md`));
+      if (content != null) list.push({ slug, title: meta.title, version: meta.version, content, history: meta.history });
+    }
+  } catch {}
+  if (list.length) return list;
+  try {
+    for (const f of fs.readdirSync(F.cases)) {
+      const m = f.match(/^([a-z0-9][a-z0-9-]*)\.json$/);
+      if (!m) continue;
+      const meta = readJson(path.join(F.cases, f));
+      const content = readText(path.join(F.cases, `${m[1]}.base.md`));
+      if (meta?.version && content != null) list.push({ slug: m[1], title: meta.title, version: meta.version, content });
+    }
+  } catch {}
+  return list;
 }
 
 // ---------- approvals (asked by this agent, answered by its own user) ----------
@@ -900,7 +1055,7 @@ async function cmdClose() {
 
 // ---------- main ----------
 const cmdVersion = () => out(`agent-bridge ${SKILL_VERSION} (protocol ${PROTOCOL})`, { version: SKILL_VERSION, protocol: PROTOCOL });
-const commands = { 'setup-agent': cmdSetupAgent, report: cmdReport, approval: cmdApproval, dashboard: cmdDashboard, version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
+const commands = { case: cmdCase, 'setup-agent': cmdSetupAgent, report: cmdReport, approval: cmdApproval, dashboard: cmdDashboard, version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
 const fn = commands[command];
 if (!fn) {
   const usage = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1).filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n');

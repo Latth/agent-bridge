@@ -6,7 +6,7 @@ import path from 'node:path';
 
 export const PROTOCOL = 'agent-bridge/1';
 // Skill/CLI release. The wire protocol above stays compatible; this tells peers which instructions the other side has.
-export const SKILL_VERSION = '1.6.0';
+export const SKILL_VERSION = '1.7.0';
 
 /**
  * Classifies an ngrok error line. "too old" is checked first: ngrok words it as an authentication
@@ -200,3 +200,55 @@ export function safeFileName(name, fallback = 'file') {
 }
 
 export const MESSAGE_TYPE_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
+// ---------- shared case files ----------
+// A case file is one Markdown document per investigation or test sweep, stored on the relay with every version
+// kept. Both agents read and edit it; messages only ring the doorbell (`case_updated`) and say what is asked.
+export const CASE_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,47}$/;
+export const MAX_CASE_BYTES = 256 * 1024;
+
+/**
+ * Compact line diff from `a` to `b`: changed lines only, prefixed "- " / "+ ", with "@@ line N" markers.
+ * Returns { lines, added, removed, truncated }. Common prefix/suffix are trimmed first; a middle too large for
+ * an LCS table falls back to "all removed, all added".
+ */
+export function lineDiff(a, b, maxLines = 80) {
+  const A = String(a ?? '').replace(/\r\n/g, '\n').split('\n');
+  const B = String(b ?? '').replace(/\r\n/g, '\n').split('\n');
+  let pre = 0;
+  while (pre < A.length && pre < B.length && A[pre] === B[pre]) pre++;
+  let suf = 0;
+  while (suf < A.length - pre && suf < B.length - pre && A[A.length - 1 - suf] === B[B.length - 1 - suf]) suf++;
+  const x = A.slice(pre, A.length - suf);
+  const y = B.slice(pre, B.length - suf);
+  const ops = []; // [kind, text, lineInB]
+  if (x.length * y.length > 4_000_000) {
+    x.forEach((t) => ops.push(['-', t, pre + 1]));
+    y.forEach((t, j) => ops.push(['+', t, pre + j + 1]));
+  } else {
+    const n = x.length;
+    const m = y.length;
+    const L = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+    let i = 0;
+    let j = 0;
+    while (i < n || j < m) {
+      if (i < n && j < m && x[i] === y[j]) { i++; j++; ops.push(['=', null, pre + j]); }
+      else if (i < n && (j >= m || L[i + 1][j] >= L[i][j + 1])) { ops.push(['-', x[i], pre + j + 1]); i++; }
+      else { ops.push(['+', y[j], pre + j + 1]); j++; }
+    }
+  }
+  const lines = [];
+  let added = 0;
+  let removed = 0;
+  let prevChanged = false;
+  for (const [kind, text, at] of ops) {
+    if (kind === '=') { prevChanged = false; continue; }
+    if (kind === '+') added++; else removed++;
+    if (!prevChanged) lines.push(`@@ line ${at}`);
+    lines.push(`${kind} ${text}`);
+    prevChanged = true;
+  }
+  const truncated = lines.length > maxLines;
+  return { lines: truncated ? lines.slice(0, maxLines) : lines, added, removed, truncated };
+}

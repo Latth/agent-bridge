@@ -29,6 +29,7 @@ accounts, pass test scenarios, test data, bug reports and fixes back and forth u
 - 🤝 **Mixed agents.** Claude Code, Codex, Cursor, Gemini CLI and Copilot can pair with each other, through the CLI or an MCP server.
 - 🪙 **No tokens while waiting.** `wait` blocks until a message arrives, and a burst of messages arrives as one batch.
 - 🛡️ **Safe by default.** Peer messages are treated as data, not instructions. Outgoing secrets are blocked, and production changes need your approval.
+- 📝 **A shared case file.** For "why is this value wrong?" or a broad sweep, both agents edit one versioned document (symptom, evidence, asks, findings, root cause) instead of retelling it in messages.
 - 👀 **You stay in control.** A live dashboard shows the conversation, approvals, notes to your agent and a one-click report.
 - 📦 **Zero dependencies.** Needs only Node 18+, and is tested on Windows, macOS and Linux.
 
@@ -102,7 +103,14 @@ The agent replies with a line like this:
 the role out and let it be inferred from the project. The code works once and expires after 15 minutes.
 
 **4. Talk to your own agent as usual.** For example "send them the test scenarios for the login change",
-"they found a bug, look at it", "close the bridge". The agents message each other in the background and tell
+"they found a bug, look at it", "close the bridge".
+
+Not only test cycles: say *"the order total comes back wrong on order detail, find out why"* or *"do a big
+sweep of the order flow on mobile, read the API calls and give backend what looks wrong"*. The UI side opens a
+shared **case file** (`case new --template investigation|sweep`), writes down what the screen and the API
+showed, and asks backend specific questions. Backend investigates and writes its findings into the same file.
+Each `case put` creates a new version and wakes the other agent, which then sees only what changed. The
+dashboard shows the case live, and the report embeds it. The agents message each other in the background and tell
 you what is happening.
 
 > [!TIP]
@@ -199,7 +207,8 @@ The agent runs these for you. You only need them for debugging.
 | `status` · `inbox` · `log` | Peers and versions, unread messages, history |
 | `code` · `kick <peer>` · `close` | (host) New pairing code, remove a peer, end the bridge and revoke all keys |
 | `dashboard [--open] [--stop]` | Local live view of the conversation, plus approvals, notes to your agent, report download, notifications |
-| `report [--thread <id>]` | Markdown report of the cycle: scenarios, bugs, data, timeline |
+| `report [--thread <id>]` | Markdown report of the cycle: scenarios, bugs, data, case files, timeline |
+| `case new` · `put` · `get` · `list` · `log` | Shared, versioned case file for investigations and sweeps. `put` wakes the peer, `get` prints only what changed, a stale `put` is refused instead of overwriting |
 | `approval request` · `wait` · `resolve` · `list` | Ask your user for a go-ahead, answerable in chat or the dashboard |
 | `version` | This machine's agent-bridge version |
 | `setup-agent --tool codex\|gemini\|cursor\|copilot\|generic` | Add bridge instructions for another coding agent to your project, and print an MCP config |
@@ -301,7 +310,8 @@ SKILL.md                  what the agent follows when it uses the bridge
 AGENTS.md                 for agents that develop this repository
 scripts/                  relay + CLI + dashboard + MCP server (Node.js, zero dependencies)
 docs/                     other-agents guide, README images
-references/               protocol · security · networking · role playbooks · mobile & web testing
+references/               protocol · investigations & case files · security · networking · role playbooks · mobile & web testing
+templates/                case file templates (investigation, sweep, blank)
 .claude-plugin/           plugin + marketplace manifests
 tests/*.test.mjs          relay/CLI tests
 tests/eval-harness/       scripted peer, fixture projects (with deliberately fake secrets), grader

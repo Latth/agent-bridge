@@ -13,6 +13,7 @@ export function gist(m) {
   if (typeof b === 'string') return cell(b);
   const o = obj(b);
   if (m.type === 'hello') return cell([o.role, o.environment, o.skill_version && `v${o.skill_version}`, o.project?.name].filter(Boolean).join(' · '));
+  if (m.type === 'case_updated') return cell([`${o.case} v${o.version}`, o.note, o.ask && `ask: ${o.ask}`].filter(Boolean).join(' · '));
   if (m.type === 'ui_testable_scenarios') return cell(`accepted ${(o.accepted || []).length}, rejected ${(o.rejected || []).length}, added ${(o.added || []).length}`);
   const pick = o.title || o.summary || o.text || o.change_summary || o.feature || o.notes || o.reason;
   const parts = [o.bug_id, o.scenario_id, o.status, pick].filter(Boolean);
@@ -22,7 +23,7 @@ export function gist(m) {
   return cell(parts.join(' · ') || JSON.stringify(b));
 }
 
-export function buildReport(messages, { thread = null, version = '', title = null } = {}) {
+export function buildReport(messages, { thread = null, version = '', title = null, cases = [] } = {}) {
   const msgs = messages.filter((m) => m.from?.id !== 'bridge' && (!thread || m.thread_id === thread));
   const people = new Map();
   for (const m of messages) if (m.from && m.from.id !== 'bridge') people.set(m.from.id, m.from);
@@ -89,6 +90,18 @@ export function buildReport(messages, { thread = null, version = '', title = nul
     out.push('## Test data created', '', '| Scenario | Kind | Values | Cleanup |', '|---|---|---|---|');
     for (const d of data) out.push(`| ${cell(d.scenario)} | ${cell(d.kind)} | ${cell(d.values && JSON.stringify(d.values))} | ${cell(d.cleanup || '—')} |`);
     out.push('');
+  }
+  // Case files mentioned in this thread (or all of them without a thread), embedded at their latest version.
+  const caseSlugs = new Set(msgs.filter((m) => m.type === 'case_updated').map((m) => obj(m.body).case));
+  const shown = cases.filter((c) => !thread || caseSlugs.has(c.slug));
+  if (shown.length) {
+    out.push('## Case files', '');
+    for (const c of shown) {
+      out.push(`### ${c.title || c.slug} (\`${c.slug}\`, v${c.version})`, '');
+      // Template hints (HTML comments) are dropped; the case title repeats the heading above, so it goes too.
+      const body = String(c.content).replace(/\r\n/g, '\n').replace(/^[ \t]*<!--[\s\S]*?-->[ \t]*\n/gm, '').replace(/[ \t]*<!--[\s\S]*?-->/g, '').replace(/^# .*\n/, '');
+      out.push(body.replace(/^(#{1,4}) /gm, '##$1 ').replace(/\n{3,}/g, '\n\n').trim(), '');
+    }
   }
   out.push('## Timeline', '');
   for (const m of msgs) {

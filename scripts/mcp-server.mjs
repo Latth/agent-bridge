@@ -36,6 +36,7 @@ const TOOLS = [
   { name: 'bridge_approval_request', description: "Ask your own user for a go-ahead; they can answer in chat or the dashboard. Then call bridge_approval_wait.", inputSchema: { type: 'object', properties: { title: str, details: str, for: { ...str, description: 'Which peer request this is for' }, id: str }, required: ['title'] } },
   { name: 'bridge_approval_wait', description: "Block until your user decided an approval.", inputSchema: { type: 'object', properties: { id: str, timeout_seconds: { type: 'integer', minimum: 1, maximum: 21600 } }, required: ['id'] } },
   { name: 'bridge_dashboard', description: 'Start the local dashboard (live view, approvals, notes, report) and return its link for your user.', inputSchema: { type: 'object', properties: { open: { type: 'boolean' } } } },
+  { name: 'bridge_case', description: 'Shared case file (one Markdown document per investigation or test sweep, versioned on the relay). new: local draft from a template; edit .agent-bridge/cases/<name>.md, then put: share it and wake the peer; get: fetch the latest and see only what changed; list; log.', inputSchema: { type: 'object', properties: { action: { type: 'string', enum: ['new', 'put', 'get', 'list', 'log'] }, name: { ...str, description: 'Case name, lowercase-with-dashes' }, template: { type: 'string', enum: ['investigation', 'sweep', 'blank'] }, title: str, note: { ...str, description: 'put: what you changed' }, ask: { ...str, description: 'put: what the other side should do next' }, to: { ...str, description: 'put: role to notify (default everyone)' }, version: { type: 'integer' }, full: { type: 'boolean' } }, required: ['action'] } },
   { name: 'bridge_close', description: 'End the bridge (host: stop relay and revoke keys; peer: leave). Ask your user first.', inputSchema: { type: 'object', properties: {} } },
 ];
 
@@ -86,6 +87,10 @@ function argsFor(name, a) {
     case 'bridge_approval_request': return ['approval', 'request', ...opt('--title', a.title), ...opt('--details', a.details), ...opt('--for', a.for), ...opt('--id', a.id)];
     case 'bridge_approval_wait': return ['approval', 'wait', s(a.id), '--timeout', String(Math.min(Math.max(Number(a.timeout_seconds) || 50, 1), 21600))];
     case 'bridge_dashboard': return ['dashboard', ...(a.open ? ['--open'] : [])];
+    case 'bridge_case': {
+      if (a.action === 'list') return ['case', 'list'];
+      return ['case', s(a.action), s(a.name), ...opt('--template', a.template), ...opt('--title', a.title), ...opt('--note', a.note), ...opt('--ask', a.ask), ...opt('--to', a.to), ...opt('--version', a.version), ...(a.full ? ['--full'] : [])];
+    }
     case 'bridge_close': return ['close'];
     default: return null;
   }

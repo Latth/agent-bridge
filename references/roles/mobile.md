@@ -71,6 +71,23 @@ A good report lets the backend agent go straight to its logs:
 
 Redact `Authorization`, cookies, tokens and personal data from everything before sending.
 
+### Investigations and sweeps (case file)
+When the user describes a symptom ("this value comes back wrong") or asks for a broad sweep instead of a test
+cycle, nobody sends `test_scenarios`. You are usually the one who opens the case
+([../investigation.md](../investigation.md)): `case new <name> --template investigation`, or `--template sweep`.
+- **Observe on screen and on the wire.** Stream logcat for the app (network tag from the profile) before you open each screen. For every anomaly, write down what the screen showed and what
+  the API returned. Same value on both? Then the API is wrong (backend). Correct response, wrong display?
+  Then it's mobile, and you check the app code yourself before handing anything over.
+- **Evidence lines, not dumps.** Endpoint, status, request id, ISO timestamp, the 1–3 decisive fields, the test
+  user id. Put screenshots and trimmed logs on a normal message with `--file` and name that message in the
+  evidence line.
+- **Sweep:** walk one area at a time, fill the Coverage table, and add each anomaly (N1...) with your layer
+  guess and an ask. Put once per area, not once per anomaly, so backend can start on the first batch while you
+  continue.
+- **Answer backend's asks** in the case (reproduce on another account, retry after a cache clear, try the
+  same call on the old app version) and put again.
+- Once there is a fix, verify it as in the retest step and fill in Verification in the case.
+
 ### 6. Retest (`fix_ready` → `retest_result`)
 Reinstall or refresh only if needed. A backend fix usually needs no new build, but clear app state if the
 bug was cached. Re-run the scenario from the start, using reset data if the backend says so, and report

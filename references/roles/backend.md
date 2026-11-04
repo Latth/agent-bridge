@@ -71,6 +71,23 @@ For each `bug_report`:
    correct response from the log) and set `suspected_layer` straight. Don't change the server to accommodate
    a client bug without your user agreeing.
 
+### Investigations and sweeps (case file)
+When the user gives you a symptom or a sweep instead of a change, there are no `test_scenarios`. Work in the
+case file ([../investigation.md](../investigation.md)):
+- If the symptom is on your side (a log, an alert, a ticket), open the case yourself with what you know and ask
+  the UI side for what only it can see: the screen, the exact request the app sent, whether another account
+  shows it too.
+- For each ask addressed to you, work from the evidence: find the request by request id or timestamp in the
+  server logs, read the code path that builds the wrong field, and query staging for the data behind it.
+  Write each result as a finding (F1...) with its proof (log line, query result, file:line). Mark hypotheses
+  confirmed or ruled out.
+- Say plainly when the API is right and the client shows it wrong, with the response that proves it. That
+  case moves to the UI side.
+- Need more from the device? Add an ask for the UI side in the case and put once. Don't send a separate
+  question as well.
+- When the root cause is clear, write it up (what, where, why), then continue as in step 5: fix, test,
+  approval before deploying, `fix_ready` naming the case.
+
 ### 6. Wrap up
 When mobile's results are in, send `final_report`. Include any API-only scenarios you verified yourself and
 the test data still to clean up. Ask your user whether to clean up now. Then summarize for your user and

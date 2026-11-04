@@ -39,6 +39,8 @@ const F = {
   info: path.join(DIR, 'dashboard.json'),
   approvals: path.join(DIR, 'approvals.json'),
   notes: path.join(DIR, 'notes.jsonl'),
+  relayCases: path.join(DIR, 'relay-cases'), // host: the authoritative store, every version
+  cases: path.join(DIR, 'cases'), //            any side: the copies this machine fetched or shared
 };
 const PAGE = fs.readFileSync(fileURLToPath(new URL('./dashboard.html', import.meta.url)), 'utf8');
 
@@ -117,6 +119,29 @@ function peers() {
 
 let all = collect();
 
+/** Case files at their latest known version. Contents are peer data and are rendered as text only. */
+function cases() {
+  const read = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } };
+  const list = [];
+  try {
+    for (const slug of fs.readdirSync(F.relayCases)) {
+      const meta = readJson(path.join(F.relayCases, slug, 'meta.json'));
+      const content = meta && read(path.join(F.relayCases, slug, `v${meta.version}.md`));
+      if (content != null) list.push({ slug, title: meta.title, version: meta.version, updated: meta.history.at(-1) ?? null, content });
+    }
+  } catch {}
+  if (list.length) return list;
+  try {
+    for (const f of fs.readdirSync(F.cases)) {
+      const m = f.match(/^([a-z0-9][a-z0-9-]*).json$/);
+      const meta = m && readJson(path.join(F.cases, f));
+      const content = meta?.version ? read(path.join(F.cases, `${m[1]}.base.md`)) : null;
+      if (content != null) list.push({ slug: m[1], title: meta.title, version: meta.version, updated: null, content });
+    }
+  } catch {}
+  return list;
+}
+
 const approvals = () => Object.values(readJson(F.approvals, {}) || {}).sort((a, b) => String(b.requested_at).localeCompare(String(a.requested_at)));
 const notes = () => { try { return fs.readFileSync(F.notes, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
 
@@ -156,7 +181,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/state') {
     res.writeHead(200, { ...common, 'content-type': 'application/json' });
-    return res.end(JSON.stringify({ version: SKILL_VERSION, dir: path.basename(path.dirname(DIR)), ...peers(), messages: all, approvals: approvals(), notes: notes() }));
+    return res.end(JSON.stringify({ version: SKILL_VERSION, dir: path.basename(path.dirname(DIR)), ...peers(), messages: all, approvals: approvals(), notes: notes(), cases: cases() }));
   }
   if (url.pathname === '/api/events') {
     res.writeHead(200, { ...common, 'content-type': 'text/event-stream', connection: 'keep-alive' });
@@ -167,7 +192,7 @@ const server = http.createServer((req, res) => {
   }
   if (url.pathname === '/api/report' && req.method === 'GET') {
     const thread = url.searchParams.get('thread') || null;
-    const md = buildReport(all, { thread, version: SKILL_VERSION });
+    const md = buildReport(all, { thread, version: SKILL_VERSION, cases: cases() });
     const name = `agent-bridge-report-${safeFileName(thread || 'all-threads')}.md`;
     res.writeHead(200, { ...common, 'content-type': 'text/markdown; charset=utf-8', 'content-disposition': `attachment; filename="${name}"` });
     return res.end(md);
@@ -225,13 +250,20 @@ const server = http.createServer((req, res) => {
 let lastPeers = '';
 let lastApprovals = '';
 let lastNotes = -1;
+let lastCases = '';
 setInterval(() => {
   const fresh = collect();
   if (fresh.length) all = all.concat(fresh);
   const p = JSON.stringify(peers());
   const ap = JSON.stringify(approvals());
   const ns = notes();
+  const cs = cases();
+  const csSig = JSON.stringify(cs.map((c) => [c.slug, c.version]));
   for (const c of clients) {
+    if (csSig !== lastCases) c.write(`event: cases
+data: ${JSON.stringify(cs)}
+
+`);
     if (fresh.length) c.write(`event: messages\ndata: ${JSON.stringify(fresh)}\n\n`);
     if (p !== lastPeers) c.write(`event: peers\ndata: ${p}\n\n`);
     if (ap !== lastApprovals) c.write(`event: approvals\ndata: ${ap}\n\n`);
@@ -241,6 +273,7 @@ setInterval(() => {
   lastPeers = p;
   lastApprovals = ap;
   lastNotes = ns.length;
+  lastCases = csSig;
 }, 1000).unref();
 
 function shutdown() {

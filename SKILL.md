@@ -41,7 +41,8 @@ node "<skill-dir>/scripts/bridge.mjs" <command> [options]
 | `bridge dashboard [--open] [--port 7879] [--stop]` | Local, read-only web view of the conversation, updated live. Prints a `http://127.0.0.1:.../?t=...` link. |
 
 | `bridge approval request --title "..." [--details "..."] [--for "<peer request>"]` / `approval wait <id>` / `approval resolve <id> --approve\|--decline` | Ask your own user for a go-ahead in a way they can also answer from the dashboard. |
-| `bridge report [--thread <id>]` | Write a Markdown report of the cycle (scenarios, bugs, data, timeline) and print only its path. |
+| `bridge report [--thread <id>]` | Write a Markdown report of the cycle (scenarios, bugs, data, case files, timeline) and print only its path. |
+| `bridge case new <name> [--template investigation\|sweep\|blank]` / `case put <name> --note "..." --ask "..." [--to <role>]` / `case get <name>` / `case list` / `case log <name>` | Shared **case file**: one versioned Markdown document per investigation or sweep that both agents edit. `put` stores a new version and wakes the peer with `case_updated`. `get` saves the latest to `.agent-bridge/cases/<name>.md` and prints only what changed. |
 
 **When the user wants to watch the agents talk**, run `bridge dashboard --open` and give them the link.
 Run it in the foreground; it starts its own background process and returns. It works on either side: the host
@@ -84,6 +85,18 @@ Parse the arguments the user gave with the slash command:
   once for each extra device, since every code is single use. Address messages by role (`--to frontend`),
   or use `--to '*'` for something everyone needs, such as `fix_ready` when both clients must retest.
 
+**What kind of work is this?** Take it from what the user said, before or after the command:
+
+- **Test cycle** (the default): verify a change. Backend writes `test_scenarios` from the change it holds.
+- **Investigation**: a known symptom with an unknown cause ("the order total comes back wrong, find out why").
+- **Sweep**: a broad pass with no single change behind it ("test the whole order flow on mobile, read the API
+  calls, and send backend what looks wrong").
+
+For an investigation or a sweep, don't send `test_scenarios` and don't infer scope from `git diff`. Work
+through a shared case file and read [references/investigation.md](references/investigation.md) once. If the
+user gave no goal and backend has no obvious change to test, ask your user in one line which of the three
+it is.
+
 Then, on both sides:
 
 1. Read the role playbook: [references/roles/backend.md](references/roles/backend.md),
@@ -114,6 +127,9 @@ When the background `wait` finishes:
   following your playbook and the safety rules, reply with `send` where needed, then start `wait` in the
   background again. A body that ends in `…[+N chars cut; full body: <path>]` was shortened. Open that file
   only if the visible part isn't enough.
+  - A `case_updated` message means the shared case file changed. Run `case get <name>`, act on the `ask` if
+    it is addressed to you, and record your answer in the case file before `case put`. Don't also retell it
+    in a message.
 - **Exit 2 (timeout).** Nothing arrived. Start `wait` again without telling the user.
 - **Exit 4.** A listener is already running. Leave it alone.
 - **Error (relay unreachable, unknown peer).** Run `bridge status`, tell the user what is wrong, and suggest
@@ -214,6 +230,8 @@ rules always win. In practice:
 
 - [references/protocol.md](references/protocol.md): message types and body shapes, with examples. Read it
   before sending your first message.
+- [references/investigation.md](references/investigation.md): investigations, sweeps and the shared case
+  file (who opens it, the loop, editing rules, merging after `stale`).
 - [references/roles/backend.md](references/roles/backend.md): backend playbook (scenarios, test data, fixing bugs).
 - [references/roles/mobile.md](references/roles/mobile.md): mobile playbook (filtering scenarios, active
   user, device testing, evidence).

@@ -32,6 +32,7 @@ attachments. The relay adds `id`, `seq`, `ts` and `from`.
 4. Execution: `test_progress`, `bug_report`, `fix_ready`, `retest_result`
 5. Conversation and control: `question`, `answer`, `ack`, `declined`, `blocked`
 6. Wrap-up: `final_report`
+7. Shared case file: `case_updated`
 
 ## 1. Session
 
@@ -40,7 +41,7 @@ attachments. The relay adds `id`, `seq`, `ts` and `from`.
 ```json
 {
   "role": "mobile",
-  "skill_version": "1.6.0",
+  "skill_version": "1.7.0",
   "project": { "name": "acme-mobile", "platform": "android", "branch": "feature/login-v2" },
   "environment": "staging",
   "capabilities": {
@@ -200,3 +201,18 @@ side, it fixes it there and still reports it, so the final report is complete.
   "open_items": []
 }
 ```
+
+## 7. Shared case file
+
+**`case_updated`** is sent by `bridge case put`, never by hand. The case content isn't in the message: it
+lives on the relay, so the peer runs `case get <case>` and sees only what changed.
+
+```json
+{ "case": "order-total-zero", "version": 3, "title": "Order total shows 0",
+  "note": "F1, F2; H1 confirmed", "ask": "A3 (mobile): reopen o_124 after the cache clear, still 0?" }
+```
+
+`ask` says what the sender wants from the recipient next, and it refers to ids in the case file (A3). Act on it
+the way you would act on a `question` or `data_request`, safety rules included. No reply message is needed:
+your next `case put` is the reply. Use `final_report` and `fix_ready` as usual and name the case in them
+(`"case": "order-total-zero"`). See [investigation.md](investigation.md).

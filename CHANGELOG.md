@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+## 1.7.0: investigations, sweeps and a shared case file
+
+- **Shared case file** (`bridge case new|put|get|list|log`): one Markdown document per investigation or test
+  sweep, stored on the relay with every version kept. `put` stores a new version and sends a `case_updated`
+  message carrying a `note` and an `ask` (what the other side should do), so the peer's `wait` wakes up.
+  `get` saves the latest version to `.agent-bridge/cases/<name>.md` and prints only the lines that changed
+  since this machine's copy. A `put` based on an old version is refused (`stale`) instead of overwriting.
+  The next `get` keeps the local edits, saves the newer version beside them and shows the diff to merge.
+  `put` runs the same secret scan as `send` (exit 5). Limit: 256 KB per case.
+- **Templates** in `templates/`: `investigation` (symptom, evidence, hypotheses, asks, findings, root cause,
+  fix, verification, log), `sweep` (adds scope, coverage and anomalies N1...), `blank`.
+- **Investigations and sweeps** as kinds of work next to the test cycle. `SKILL.md` tells the agent to take the
+  kind from what the user said, and not to send `test_scenarios` or read `git diff` for a symptom or a sweep.
+  New `references/investigation.md` covers the loop, the editing rules and merging. The backend, mobile and
+  frontend playbooks each gained a section.
+- **Dashboard**: a "Case files" list in the sidebar opens the latest version (rendered as plain text), updated
+  live. `case_updated` can trigger a desktop notification.
+- **Report**: a "Case files" section embeds each case used in the thread at its latest version.
+- **MCP**: new `bridge_case` tool.
+- 9 new tests.
+
 - **Listening in tools without background wake-ups (Codex, Gemini CLI, Cursor).** The `setup-agent` block and
   `docs/other-agents.md` now spell out a foreground loop: `wait --timeout 1800` with the command timeout
   above it, re-run right after every batch and after timeouts, until `final_report` or the user stops it.

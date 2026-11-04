@@ -11,7 +11,7 @@ import {
   PROTOCOL, SKILL_VERSION, DEFAULT_PORT, MAX_BODY_BYTES, MAX_ATTACHMENT_BYTES, CLOCK_SKEW_MS, CODE_TTL_MS, MAX_PAIR_FAILURES,
   LONG_POLL_CAP_MS, MESSAGE_TYPE_RE, b64u, fromB64u, randomId, newPairingCode, normalizeCode, pairProof, safeEqual,
   genKeyPair, deriveSessionKey, seal, open, requestAad, responseAad, resolveStateDir, ensureDir, readJson,
-  writeJsonPrivate, appendJsonl,
+  writeJsonPrivate, appendJsonl, CASE_SLUG_RE, MAX_CASE_BYTES,
 } from './lib.mjs';
 import crypto from 'node:crypto';
 
@@ -154,6 +154,52 @@ function post(from, { to = '*', type, thread_id = null, reply_to = null, body = 
 }
 
 const systemSender = { id: 'bridge', role: 'bridge', name: 'agent-bridge' };
+
+// ---------- shared case files ----------
+// relay-cases/<slug>/meta.json + v<N>.md. Every version is kept, so nobody's edit is ever lost, and a put must
+// name the version it was based on: a stale base is refused (409) and the writer merges the newer version first.
+const CASES_DIR = path.join(DIR, 'relay-cases');
+const caseDir = (slug) => path.join(CASES_DIR, slug);
+const caseMeta = (slug) => readJson(path.join(caseDir(slug), 'meta.json'));
+const cleanLine = (v, max) => String(v ?? '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, max);
+
+function checkSlug(slug) {
+  if (!CASE_SLUG_RE.test(String(slug))) throw new HttpError(400, 'case name must be lowercase letters, digits and dashes, e.g. "order-total-zero"');
+  return String(slug);
+}
+
+function caseVersion(slug, v) {
+  const meta = caseMeta(slug);
+  if (!meta) throw new HttpError(404, `no case "${slug}" (create it with \`case new\` and \`case put\`)`);
+  const n = v == null ? meta.version : Number(v);
+  const entry = meta.history.find((h) => h.version === n);
+  if (!entry) throw new HttpError(404, `case "${slug}" has no version ${v} (latest is ${meta.version})`);
+  return { meta, entry, content: fs.readFileSync(path.join(caseDir(slug), `v${n}.md`), 'utf8') };
+}
+
+function putCase(peer, { slug, title, content, base = 0, note = '', ask = '', to = '*', thread_id = null }) {
+  slug = checkSlug(slug);
+  if (typeof content !== 'string' || !content.trim()) throw new HttpError(400, 'case content is empty');
+  if (Buffer.byteLength(content) > MAX_CASE_BYTES) throw new HttpError(413, `case file over ${MAX_CASE_BYTES / 1024} KB; move evidence into message attachments and link them`);
+  const meta = caseMeta(slug) ?? { slug, title: null, version: 0, created_at: new Date().toISOString(), history: [] };
+  if (Number(base) !== meta.version) {
+    const last = meta.history.at(-1);
+    throw new HttpError(409, `stale: case "${slug}" is at v${meta.version}${last ? ` (by ${last.by.role}: ${last.note || 'no note'})` : ''}, your edit is based on v${Number(base)}. Run \`case get ${slug}\`, merge your changes into it, and put again.`);
+  }
+  const version = meta.version + 1;
+  fs.mkdirSync(caseDir(slug), { recursive: true });
+  fs.writeFileSync(path.join(caseDir(slug), `v${version}.md`), content, { mode: 0o600 });
+  meta.version = version;
+  meta.title = cleanLine(title, 120) || meta.title || slug;
+  meta.history.push({ version, ts: new Date().toISOString(), by: { id: peer.id, role: peer.role, name: peer.name }, note: cleanLine(note, 300), ask: cleanLine(ask, 600), chars: content.length });
+  writeJsonPrivate(path.join(caseDir(slug), 'meta.json'), meta);
+  // The doorbell: a normal message, so the other agents' `wait` wakes up and the update shows in every log.
+  const body = { case: slug, version, title: meta.title };
+  if (meta.history.at(-1).note) body.note = meta.history.at(-1).note;
+  if (meta.history.at(-1).ask) body.ask = meta.history.at(-1).ask;
+  const msg = post(peer, { to, type: 'case_updated', thread_id, body });
+  return { slug, version, title: meta.title, id: msg.id, recipients: Object.values(state.peers).filter((p) => isFor(msg, p)).map((p) => p.id) };
+}
 
 // ---------- http helpers ----------
 class HttpError extends Error {
@@ -301,6 +347,23 @@ async function handleRpc(req, res, op) {
       });
       if (res.destroyed) return;
       return reply({ messages: result, seq: state.seq });
+    }
+    case 'case_put': {
+      const to = payload.to ?? '*';
+      const peers = Object.values(state.peers).filter((p) => p.id !== peer.id);
+      if (to !== '*' && !peers.some((p) => p.id === to || p.role === to)) throw new HttpError(400, `unknown recipient "${to}"`);
+      return reply(putCase(peer, { ...payload, to }));
+    }
+    case 'case_get': {
+      const slug = checkSlug(payload.slug);
+      const { meta, entry, content } = caseVersion(slug, payload.version);
+      return reply({ slug, title: meta.title, latest: meta.version, version: entry.version, entry, content, history: meta.history });
+    }
+    case 'case_list': {
+      let slugs = [];
+      try { slugs = fs.readdirSync(CASES_DIR); } catch {}
+      const cases = slugs.map(caseMeta).filter(Boolean).map((m) => ({ slug: m.slug, title: m.title, version: m.version, updated: m.history.at(-1) }));
+      return reply({ cases });
     }
     case 'peers':
       return reply({ me: publicPeer(peer), peers: Object.values(state.peers).map(publicPeer), seq: state.seq });

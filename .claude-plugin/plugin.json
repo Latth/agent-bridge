@@ -1,8 +1,8 @@
 {
   "name": "agent-bridge",
   "displayName": "Agent Bridge",
-  "version": "1.6.0",
-  "description": "Connect Claude Code sessions on different machines (backend, mobile, web) over an end-to-end encrypted relay so the agents can run test cycles together.",
+  "version": "1.7.0",
+  "description": "Connect Claude Code sessions on different machines (backend, mobile, web) over an end-to-end encrypted relay so the agents can run test cycles and investigations together, sharing a versioned case file.",
   "author": { "name": "Latth", "url": "https://github.com/Latth" },
   "homepage": "https://github.com/Latth/agent-bridge",
   "repository": "https://github.com/Latth/agent-bridge",

@@ -89,6 +89,13 @@
   .appr .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
   .appr input { flex: 1; min-width: 140px; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; font: inherit; }
   .msg.user .card { border-style: dashed; background: color-mix(in srgb, var(--ok) 7%, var(--panel)); }
+  .casebtn { display: block; width: 100%; text-align: left; background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; color: var(--text); font: inherit; cursor: pointer; }
+  .casebtn:hover, .casebtn.active { background: var(--panel-2); border-color: var(--line); }
+  .casebtn .sub { display: block; font-size: 11px; color: var(--muted); }
+  #caseView { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; }
+  #caseView .row { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+  #caseView h3 { margin: 0; font-size: 15px; }
+  #caseView pre { max-height: none; white-space: pre-wrap; word-break: break-word; }
   .decided { font-size: 12px; color: var(--muted); margin: 4px 0 12px; text-align: center; }
   @media (max-width: 760px) {
     .layout { grid-template-columns: 1fr; height: auto; }
@@ -112,6 +119,8 @@
   <aside>
     <h2>Agents</h2>
     <div id="agents"></div>
+    <h2>Case files</h2>
+    <div id="cases"></div>
     <h2>Threads</h2>
     <div id="threads"></div>
     <h2>Note to your agent</h2>
@@ -122,7 +131,7 @@
     </div>
     <p class="note">Only reachable from this computer.</p>
   </aside>
-  <main id="timeline-wrap"><div id="approvals" aria-live="assertive"></div><div id="timeline" aria-live="polite"></div></main>
+  <main id="timeline-wrap"><div id="approvals" aria-live="assertive"></div><section id="caseView" hidden></section><div id="timeline" aria-live="polite"></div></main>
 </div>
 <script nonce="__NONCE__">
 (() => {
@@ -134,7 +143,7 @@
   const TYPE_COLORS = {
     hello: '#64748b', test_scenarios: '#2563eb', ui_testable_scenarios: '#0891b2', data_request: '#d97706', data_response: '#16a34a',
     test_progress: '#0d9488', bug_report: '#dc2626', fix_ready: '#7c3aed', retest_result: '#0d9488', question: '#ca8a04', answer: '#65a30d',
-    ack: '#64748b', declined: '#b91c1c', blocked: '#ea580c', final_report: '#1d4ed8', peer_joined: '#6b7280', peer_left: '#6b7280',
+    case_updated: '#0f766e', ack: '#64748b', declined: '#b91c1c', blocked: '#ea580c', final_report: '#1d4ed8', peer_joined: '#6b7280', peer_left: '#6b7280',
     user_note: '#16a34a', approval_request: '#d97706', approved: '#16a34a', declined_by_you: '#b91c1c',
   };
   ROLE_COLORS.you = '#0f766e';
@@ -142,10 +151,11 @@
   const roleColor = (r) => ROLE_COLORS[r] || hue(r || '?');
   const typeColor = (t) => TYPE_COLORS[t] || hue(t || '?');
 
-  let state = { me: null, peers: [], messages: [], approvals: [], notes: [] };
+  let state = { me: null, peers: [], messages: [], approvals: [], notes: [], cases: [] };
+  let openCase = '';
   let notifyOn = false;
   try { notifyOn = localStorage.getItem('ab-notify') === '1' && 'Notification' in window && Notification.permission === 'granted'; } catch {}
-  const NOTIFY_TYPES = new Set(['bug_report', 'final_report', 'declined', 'blocked', 'question', 'fix_ready']);
+  const NOTIFY_TYPES = new Set(['case_updated', 'bug_report', 'final_report', 'declined', 'blocked', 'question', 'fix_ready']);
   let unseen = 0;
   let filter = { thread: '', type: '', text: '' };
   let connected = false;
@@ -246,6 +256,35 @@
     };
     box.append(mk('', 'All messages', state.messages.length));
     for (const [k, n] of [...counts.entries()].sort((a, b) => b[1] - a[1])) box.append(mk(k || '__none__', k || '(no thread)', n));
+  }
+
+  function renderCases() {
+    const box = q('#cases'); box.replaceChildren();
+    if (!state.cases.length) { box.append(el('div', 'note', 'None yet. Agents open one with `case new`.')); }
+    for (const c of state.cases) {
+      const b = el('button', 'casebtn' + (openCase === c.slug ? ' active' : ''), c.title || c.slug);
+      const by = c.updated && c.updated.by ? ` · ${c.updated.by.role} ${fmtTime(c.updated.ts)}` : '';
+      b.append(el('span', 'sub', `${c.slug} · v${c.version}${by}`));
+      b.addEventListener('click', () => { openCase = openCase === c.slug ? '' : c.slug; renderCases(); renderCaseView(); });
+      box.append(b);
+    }
+    renderCaseView();
+  }
+
+  function renderCaseView() {
+    const view = q('#caseView');
+    const c = state.cases.find((x) => x.slug === openCase);
+    view.hidden = !c; view.replaceChildren();
+    if (!c) return;
+    const row = el('div', 'row');
+    row.append(el('h3', null, `${c.title || c.slug} · v${c.version}`));
+    const close = el('button', 'btn', 'Close');
+    close.addEventListener('click', () => { openCase = ''; renderCases(); });
+    row.append(close);
+    const sub = c.updated ? el('div', 'note', [c.updated.by && `last edit by ${c.updated.by.role}`, c.updated.note, c.updated.ask && `ask: ${c.updated.ask}`].filter(Boolean).join(' · ')) : null;
+    view.append(row);
+    if (sub) view.append(sub);
+    view.append(el('pre', null, c.content)); // peer-written Markdown, shown as plain text on purpose
   }
 
   function renderTypes() {
@@ -367,8 +406,8 @@
     const res = await fetch(api('/api/state'));
     if (!res.ok) { setLive(false, `error ${res.status}`); q('#timeline').replaceChildren(el('div', 'empty', res.status === 401 ? 'Wrong or missing token. Open the exact URL that `bridge dashboard` printed.' : `Could not load (${res.status}).`)); return; }
     const data = await res.json();
-    state = { me: data.me, peers: data.peers || [], messages: data.messages || [], approvals: data.approvals || [], notes: data.notes || [] };
-    sortMsgs(); renderTypes(); render();
+    state = { me: data.me, peers: data.peers || [], messages: data.messages || [], approvals: data.approvals || [], notes: data.notes || [], cases: data.cases || [] };
+    sortMsgs(); renderTypes(); render(); renderCases();
     document.title = `Agent Bridge Monitor · ${state.me ? state.me.role : 'bridge'}`;
     listen();
   }
@@ -394,6 +433,7 @@
       for (const a of next) if (a.status === 'pending' && !before.has(a.id)) notify('Approval needed', `${a.id}: ${a.title}`);
     });
     es.addEventListener('notes', (e) => { state.notes = JSON.parse(e.data); render(); });
+    es.addEventListener('cases', (e) => { state.cases = JSON.parse(e.data); renderCases(); });
   }
 
   q('#noteSend').addEventListener('click', async () => {
