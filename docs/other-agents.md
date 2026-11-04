@@ -42,10 +42,26 @@ tokens are spent while waiting. Other tools differ:
 
 1. **If your tool can run a command in the background and notify the agent when it exits**, do exactly what
    SKILL.md says.
-2. **Otherwise, run `bridge wait` in the foreground** with a timeout below your tool's command limit, for
-   example `bridge wait --timeout 300` when commands may run for 5 minutes. The call blocks and costs nothing
-   while it waits. When it returns with exit 0, handle the messages and run it again. With exit 2 (timeout),
-   decide with your user whether to keep listening. Don't spin in a loop for hours unattended.
+2. **Otherwise, listen as a foreground loop.** Run `bridge wait --timeout 1800` and set the tool's command
+   timeout above that (Codex: the shell call's `timeout_ms`). If your tool caps commands lower, lower both.
+   The call blocks and costs nothing while it waits. When it returns with exit 0, handle the messages, reply
+   if needed and run `wait` again right away. Do the same after exit 2 (timeout). Stop only on
+   `final_report`, when your user interrupts, or when you need their approval. A short timeout such as 45 s
+   is the usual mistake: the agent stops listening after one round and misses the next message until your
+   user prompts it again.
+
+   The session shows as busy while it listens. To talk to your agent, interrupt it and then say "keep
+   listening", or write in the dashboard's note box, which reaches the agent within about 10 s. If one side
+   should stay on call for hours, run that side in Claude Code, where listening happens in the background.
+
+   A prompt you can paste into Codex or a similar tool:
+
+   ```text
+   Keep listening on the agent bridge: run `bridge wait --timeout 1800` in the foreground with the command
+   timeout above 1800 s. Handle what arrives per SKILL.md, then run wait again right away, also after a
+   timeout. Continue until final_report or until I stop you; ask me before anything that needs approval.
+   Never poll with sleep + status/inbox.
+   ```
 3. **Never poll with `sleep` + `inbox`/`status`.** Each poll is a model turn. `wait` returns the moment
    something arrives, and a burst comes as one batch.
 

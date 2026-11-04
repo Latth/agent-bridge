@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- **Listening in tools without background wake-ups (Codex, Gemini CLI, Cursor).** The `setup-agent` block and
+  `docs/other-agents.md` now spell out a foreground loop: `wait --timeout 1800` with the command timeout
+  above it, re-run right after every batch and after timeouts, until `final_report` or the user stops it.
+  They also give a prompt to paste. In a Codex field test the agent used a 45 s wait, stopped listening
+  after one round and missed later messages. The `wait` timeout hint no longer says "background" only.
+
 ## 1.6.0: other coding agents
 
 - **`bridge setup-agent --tool codex|gemini|cursor|copilot|generic [--project <dir>]`** adds a short
