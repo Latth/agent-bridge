@@ -2,19 +2,21 @@
 
 # 🌉 agent-bridge
 
-**Let Claude Code sessions on different machines work together.**
+**Let coding agents on different machines work together.** Built for Claude Code, and it also works with
+Codex, Gemini CLI, Cursor, Copilot, or any agent that can run a command or speak MCP.
 
 A backend agent and a mobile or web agent, on two laptops and two networks, with the same or different
 accounts, pass test scenarios, test data, bug reports and fixes back and forth until the feature works.
 
-[![version](https://img.shields.io/badge/version-1.5.0-2563eb)](CHANGELOG.md)
+[![version](https://img.shields.io/badge/version-1.6.0-2563eb)](CHANGELOG.md)
 [![license](https://img.shields.io/badge/license-MIT-16a34a)](LICENSE)
 [![node](https://img.shields.io/badge/node-%E2%89%A518-339933?logo=node.js&logoColor=white)](https://nodejs.org)
 [![dependencies](https://img.shields.io/badge/dependencies-0-6b7280)](scripts)
 [![tests](https://github.com/Latth/agent-bridge/actions/workflows/test.yml/badge.svg)](https://github.com/Latth/agent-bridge/actions/workflows/test.yml)
 [![Claude Code](https://img.shields.io/badge/Claude%20Code-skill%20%2B%20plugin-d97757)](https://claude.com/claude-code)
+[![MCP](https://img.shields.io/badge/MCP-server-6366f1)](docs/other-agents.md#mcp-instead-of-the-shell)
 
-[Quick start](#-quick-start) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
+[Quick start](#-quick-start) · [Other agents](#-other-agents-codex-gemini-cursor-copilot) · [Dashboard](#-watch-the-conversation) · [How it works](#-how-it-works) · [Commands](#-commands) ·
 [Security](#-security) · [FAQ](#-faq) · [Changelog](CHANGELOG.md)
 
 </div>
@@ -97,6 +99,25 @@ you what is happening.
 > and the address never changes. Without one, a restarted host may get a new URL: run `host` again, and
 > paired peers only need `/agent-bridge resume <new-url>`. No new code is needed until someone runs `close`.
 
+## 🤝 Other agents: Codex, Gemini, Cursor, Copilot
+
+The bridge is a plain Node.js CLI plus a JSON protocol, so the two sides don't have to be the same tool. A
+Claude backend agent can work with a Codex mobile agent. From your project's root:
+
+```bash
+node ~/agent-bridge/scripts/bridge.mjs setup-agent --tool codex     # or gemini · cursor · copilot · generic
+```
+
+This adds a short block to the file that tool reads: `AGENTS.md`, `GEMINI.md`, `.cursor/rules/` or
+`.github/copilot-instructions.md`. The block points the agent to `SKILL.md` and the CLI. It also prints an
+**MCP server** config: `scripts/mcp-server.mjs` exposes `bridge_host`, `bridge_connect`, `bridge_send`,
+`bridge_wait`, `bridge_report`, approvals and more as MCP tools. They run the same CLI underneath, so the
+secret scan and the compact output still apply.
+
+One difference matters for cost. Claude Code wakes the agent when a background `wait` finishes, so idle time
+is free. In tools without that, the agent runs `wait` in the foreground with a timeout, which still spends no
+tokens while it blocks. Details are in [docs/other-agents.md](docs/other-agents.md).
+
 ## 👀 Watch the conversation
 
 Ask your agent to *"open the bridge dashboard"* (it runs `bridge dashboard --open`). You get a live web view
@@ -170,6 +191,7 @@ The agent runs these for you. You only need them for debugging.
 | `report [--thread <id>]` | Markdown report of the cycle: scenarios, bugs, data, timeline |
 | `approval request` · `wait` · `resolve` · `list` | Ask your user for a go-ahead, answerable in chat or the dashboard |
 | `version` | This machine's agent-bridge version |
+| `setup-agent --tool codex\|gemini\|cursor\|copilot\|generic` | Add bridge instructions for another coding agent to your project, and print an MCP config |
 
 They are all `node scripts/bridge.mjs <command>`. State lives in `.agent-bridge/` in the project, which
 git-ignores itself.
@@ -201,7 +223,7 @@ values), the message is not sent. Details are in [references/security.md](refere
 
 | | |
 |---|---|
-| ✅ **Relay, CLI and dashboard** | 45 automated tests, run by CI on Windows, macOS and Linux (Node 18 and 22): pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, the token budget (batching, compact output, body cut-offs), the outgoing secret scan, reports, approvals and dashboard notes (`node --test tests/*.test.mjs`) |
+| ✅ **Relay, CLI, dashboard and MCP** | 51 automated tests, run by CI on Windows, macOS and Linux (Node 18 and 22): pairing, encryption, replay/tamper rejection, attachments, long-poll, resume after a host restart, versions, thread reuse, the dashboard's token, Host check, key hygiene, file paths and live stream, the token budget (batching, compact output, body cut-offs), the outgoing secret scan, reports, approvals, dashboard notes, the MCP server and `setup-agent` (`node --test tests/*.test.mjs`) |
 | ✅ **Agent behavior** | 5 scenarios against a scripted peer: backend creates staging data, backend refuses a prod migration and secrets, mobile bug report, web bug report, and no ping-pong after a friendly ack. **30/30 checks with the skill, 23/30 without.** The safety and no-ping-pong cases pass either way: today's model already behaves there. The skill's edge is the shared protocol and complete evidence ([eval harness](tests/eval-harness/README.md)) |
 | ✅ **Field test** | Two machines on different networks over ngrok: pairing, `hello` both ways, attachments, background wake-up on every message |
 | ⏳ **Not yet verified** | A full data → bug → fix → retest cycle on a real project, very long sessions, and plugin install from the marketplace |
@@ -214,7 +236,17 @@ backend ↔ mobile/web cycles are the most useful.
 <details>
 <summary><b>Do both machines need the same Claude account?</b></summary>
 
-No. The agents talk through the relay, not through Anthropic, so any two Claude Code sessions can pair.
+No. The agents talk through the relay, not through Anthropic, so any two sessions can pair. They don't even
+need to be the same tool.
+</details>
+
+<details>
+<summary><b>Does it work with Codex, Gemini CLI, Cursor or Copilot?</b></summary>
+
+Yes: run `setup-agent` for that tool, or register the MCP server (see [Other agents](#-other-agents-codex-gemini-cursor-copilot)).
+The CLI, relay, dashboard and MCP server are tested on every platform. The *behavior* evals (safety rules,
+protocol use) were run with Claude only, so other models follow the same instructions but haven't been
+measured.
 </details>
 
 <details>
@@ -254,9 +286,10 @@ the older side with `git pull` or through `/plugin`.
 ## 🗂️ Repository layout
 
 ```
-SKILL.md                  what Claude follows when the skill runs
-scripts/                  relay + CLI + dashboard (Node.js, zero dependencies)
-docs/                     images for this README
+SKILL.md                  what the agent follows when it uses the bridge
+AGENTS.md                 for agents that develop this repository
+scripts/                  relay + CLI + dashboard + MCP server (Node.js, zero dependencies)
+docs/                     other-agents guide, README images
 references/               protocol · security · networking · role playbooks · mobile & web testing
 .claude-plugin/           plugin + marketplace manifests
 tests/*.test.mjs          relay/CLI tests

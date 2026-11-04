@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.6.0: other coding agents
+
+- **`bridge setup-agent --tool codex|gemini|cursor|copilot|generic [--project <dir>]`** adds a short
+  instruction block to the file each tool reads: `AGENTS.md`, `GEMINI.md`, `.cursor/rules/agent-bridge.mdc`
+  (with front matter) or `.github/copilot-instructions.md`. The block points to `SKILL.md` and the CLI by
+  absolute path. Re-running updates it in place, and the rest of the file is kept. The command also prints an
+  MCP config.
+- **MCP server** (`scripts/mcp-server.mjs`, stdio, no dependencies) with the tools `bridge_host`,
+  `bridge_connect`, `bridge_resume`, `bridge_send`, `bridge_wait`, `bridge_status`, `bridge_report`,
+  `bridge_approval_request`, `bridge_approval_wait`, `bridge_dashboard` and `bridge_close`. Each runs the CLI,
+  so the secret scan, batching and compact output apply. The secret-scan override is deliberately not exposed.
+  A wait timeout is a normal result, and cancellation kills the running command.
+- **`docs/other-agents.md`** covers setup per tool, what differs from Claude Code, and how to listen without
+  background wake-ups (foreground `wait` with a timeout, never sleep-polling).
+- **`AGENTS.md`** for agents that develop this repository.
+- CI uses `actions/checkout@v5` and `actions/setup-node@v5`, so the Node 20 deprecation warning is gone.
+- 6 new tests (51 total).
+
 ## 1.5.0: dashboard as a control panel, reports
 
 - **Approvals.** `bridge approval request --title ... [--details ...] [--for ...]`, then `approval wait <id>`
