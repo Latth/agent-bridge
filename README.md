@@ -102,6 +102,9 @@ The agent replies with a line like this:
 **3. Paste that line into Claude on the other machine.** Use `--role mobile` or `--role frontend`, or leave
 the role out and let it be inferred from the project. The code works once and expires after 15 minutes.
 
+Forgot what it can do? `/agent-bridge help` lists everything, and `/agent-bridge help case` (or start, work,
+dashboard, safety, trouble...) shows one topic.
+
 **4. Talk to your own agent as usual.** For example "send them the test scenarios for the login change",
 "they found a bug, look at it", "close the bridge".
 
@@ -211,6 +214,7 @@ The agent runs these for you. You only need them for debugging.
 | `case new` · `put` · `get` · `list` · `log` | Shared, versioned case file for investigations and sweeps. `put` wakes the peer, `get` prints only what changed, a stale `put` is refused instead of overwriting |
 | `approval request` · `wait` · `resolve` · `list` | Ask your user for a go-ahead, answerable in chat or the dashboard |
 | `version` | This machine's agent-bridge version |
+| `help [topic]` | What the bridge can do, as a plain list ([HELP.md](HELP.md)). In Claude: `/agent-bridge help` |
 | `setup-agent --tool codex\|gemini\|cursor\|copilot\|generic` | Add bridge instructions for another coding agent to your project, and print an MCP config |
 
 They are all `node scripts/bridge.mjs <command>`. State lives in `.agent-bridge/` in the project, which
@@ -307,6 +311,7 @@ the older side with `git pull` or through `/plugin`.
 
 ```
 SKILL.md                  what the agent follows when it uses the bridge
+HELP.md                   what the bridge can do, for people (`/agent-bridge help`)
 AGENTS.md                 for agents that develop this repository
 scripts/                  relay + CLI + dashboard + MCP server (Node.js, zero dependencies)
 docs/                     other-agents guide, README images

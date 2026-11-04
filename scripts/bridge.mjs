@@ -22,6 +22,7 @@
 //            put <name> [--note "..."] [--ask "..."] [--to <role>]   share your edits (new version, wakes the peer)
 //            get <name> [--version N] [--full]   fetch the latest version; prints only what changed since your copy
 //            list | log <name>
+//   help     [topic]                   what the bridge can do, for the user (topics: start, work, case, ...)
 //
 // Global: --dir <state dir> (default ./.agent-bridge or $AGENT_BRIDGE_DIR), --json for machine-readable output.
 // Exit codes: 0 ok / messages delivered, 1 error, 2 wait timed out, 4 another listener is already running,
@@ -1053,13 +1054,26 @@ async function cmdClose() {
   }
 }
 
+// ---------- help ----------
+// HELP.md is the one list of what the bridge can do, written for the user. `help` prints it whole,
+// `help <topic>` only the `## <topic>: ...` section. Needs no session, so it works before any bridge exists.
+function cmdHelp() {
+  const text = fs.readFileSync(path.join(SKILL_ROOT, 'HELP.md'), 'utf8').replace(/\r\n/g, '\n');
+  const sections = [...text.matchAll(/^## (\w+): (.*)\n([\s\S]*?)(?=^## |(?![\s\S]))/gm)].map((m) => ({ topic: m[1], title: m[2], body: m[3].trim() }));
+  const topic = pos[0] ? String(pos[0]).toLowerCase().replace(/^:/, '') : null;
+  if (!topic) return out(text.trim(), { version: SKILL_VERSION, topics: sections.map(({ topic: t, title }) => ({ topic: t, title })), text });
+  const s = sections.find((x) => x.topic === topic || x.title.toLowerCase().includes(topic));
+  if (!s) die(`no help topic "${topic}". Topics: ${sections.map((x) => x.topic).join(', ')}`);
+  return out(`## ${s.title}\n${s.body}`, s);
+}
+
 // ---------- main ----------
-const cmdVersion = () => out(`agent-bridge ${SKILL_VERSION} (protocol ${PROTOCOL})`, { version: SKILL_VERSION, protocol: PROTOCOL });
-const commands = { case: cmdCase, 'setup-agent': cmdSetupAgent, report: cmdReport, approval: cmdApproval, dashboard: cmdDashboard, version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
+const cmdVersion =() => out(`agent-bridge ${SKILL_VERSION} (protocol ${PROTOCOL})`, { version: SKILL_VERSION, protocol: PROTOCOL });
+const commands = { help: cmdHelp, case: cmdCase, 'setup-agent': cmdSetupAgent, report: cmdReport, approval: cmdApproval, dashboard: cmdDashboard, version: cmdVersion, resume: cmdResume, host: cmdHost, connect: cmdConnect, send: cmdSend, wait: cmdWait, inbox: cmdInbox, status: cmdStatus, code: cmdCode, kick: cmdKick, log: cmdLog, close: cmdClose };
 const fn = commands[command];
 if (!fn) {
   const usage = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').slice(1).filter((l) => l.startsWith('//')).map((l) => l.slice(3)).join('\n');
-  process.stdout.write(usage + '\n');
+  process.stdout.write(`${usage}\n\nRun \`help\` for what the bridge can do, in plain words.\n`);
   process.exitCode = command ? 1 : 0;
 } else try {
   await fn();

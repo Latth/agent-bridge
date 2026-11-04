@@ -1,6 +1,6 @@
 ---
 name: agent-bridge
-description: Connect two Claude Code sessions running on different machines (same or different accounts) so the agents can message each other and work through a shared task, such as a backend agent with a mobile or web frontend agent running a test cycle together. One side runs `/agent-bridge host --role backend`, which starts an encrypted relay exposed through ngrok or the LAN and prints a pairing code. The other runs `/agent-bridge connect` with that address, the code and its own role (e.g. mobile). Use this skill whenever the user wants agents on two devices or two teams to talk, hand off test scenarios, request test data, report bugs to each other, or "connect to the other Claude", and whenever they paste an agent-bridge address or pairing code, even if they never say "bridge".
+description: Connect two Claude Code sessions running on different machines (same or different accounts) so the agents can message each other and work through a shared task, such as a backend agent with a mobile or web frontend agent running a test cycle together. One side runs `/agent-bridge host --role backend`, which starts an encrypted relay exposed through ngrok or the LAN and prints a pairing code. The other runs `/agent-bridge connect` with that address, the code and its own role (e.g. mobile). Use this skill whenever the user wants agents on two devices or two teams to talk, hand off test scenarios, request test data, report bugs to each other, or "connect to the other Claude", and whenever they paste an agent-bridge address or pairing code, even if they never say "bridge". Also use it when the user runs `/agent-bridge help` or asks what the bridge can do.
 compatibility: Claude Code (CLI or desktop) with a shell and background commands. Node.js 18+ on both machines. ngrok on the host for internet mode (LAN mode needs nothing extra).
 ---
 
@@ -38,6 +38,7 @@ node "<skill-dir>/scripts/bridge.mjs" <command> [options]
 | `bridge log [--n 20]` | Recent messages sent and received on this machine. |
 | `bridge kick <peer_id>` / `bridge close` | Remove a peer / end the bridge. `close` on the host revokes every key. |
 | `bridge version` | This machine's agent-bridge version (put it in your `hello`). |
+| `bridge help [topic]` | What the bridge can do, written for the user ([HELP.md](HELP.md)). Topics: start, work, case, talk, dashboard, safety, finish, agents, trouble, commands. |
 | `bridge dashboard [--open] [--port 7879] [--stop]` | Local, read-only web view of the conversation, updated live. Prints a `http://127.0.0.1:.../?t=...` link. |
 
 | `bridge approval request --title "..." [--details "..."] [--for "<peer request>"]` / `approval wait <id>` / `approval resolve <id> --approve\|--decline` | Ask your own user for a go-ahead in a way they can also answer from the dashboard. |
@@ -57,6 +58,11 @@ quoting breaks easily. Put drafts in `.agent-bridge/outbox/<something>.json`.
 ## Starting a bridge
 
 Parse the arguments the user gave with the slash command:
+
+- **`help`, `:help`, `help <topic>`, or "what can you do / I forgot how X works".** Run `bridge help [topic]`
+  (no session needed) and give your user the list in their language, keeping the structure: headings, bullets
+  and the example phrases, translated. Leave commands and flags as they are. Don't start or join a bridge. End
+  with one line saying they can ask for a single topic, e.g. `/agent-bridge help case`.
 
 - **`host ...`, or no arguments.** You are the host. If no role was given, infer it from the project and say
   which you picked:

@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+## 1.8.0: help
+
+- **`/agent-bridge help [topic]`** lists what the bridge can do, in plain words with example phrases, so
+  nobody has to remember the commands. The agent runs the new `bridge help` (no session needed) and gives the
+  list to the user in their language. The topics are start, work, case, talk, dashboard, safety, finish,
+  agents, trouble and commands. The text lives in `HELP.md`, which is also readable on GitHub.
+- MCP: new `bridge_help` tool.
+- Running the CLI with an unknown command now points to `help`.
+- 4 new tests, including one that fails when a CLI command is missing from `HELP.md`.
+
 ## 1.7.0: investigations, sweeps and a shared case file
 
 - **Shared case file** (`bridge case new|put|get|list|log`): one Markdown document per investigation or test
